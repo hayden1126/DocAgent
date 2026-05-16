@@ -25,7 +25,7 @@ from docagent.artifacts.agents_md import AgentsMdArtifact
 from docagent.artifacts.claude_md import ClaudeMdArtifact
 from docagent.artifacts.llms_txt import LlmsTxtArtifact
 from docagent.artifacts.registry import GenerationContext
-from docagent.verify import citations
+from docagent.verify import citations, links
 from tests.golden._harness import (
     FIXTURES_DIR,
     RECORDINGS_DIR,
@@ -72,6 +72,16 @@ def test_snapshot_citations_validate(case: _Case, tinylib_root: Path) -> None:
     patch = artifact.generate(artifact.plan(ctx)[0], ctx)
     ok, findings = citations.check(patch, ctx)
     assert ok, f"citation gate failed for {case.artifact_factory.__name__}: {list(findings)}"
+
+
+@pytest.mark.parametrize("case", CASES, ids=lambda c: c.artifact_factory.__name__)
+def test_snapshot_links_validate(case: _Case, tinylib_root: Path) -> None:
+    backend = RecordedBackend(recording_path=RECORDINGS_DIR / case.recording_name)
+    artifact = case.artifact_factory()
+    ctx = GenerationContext(repo_root=tinylib_root, store=None, backend=backend)
+    patch = artifact.generate(artifact.plan(ctx)[0], ctx)
+    ok, findings = links.check(patch, ctx)
+    assert ok, f"link gate failed for {case.artifact_factory.__name__}: {list(findings)}"
 
 
 @pytest.mark.parametrize("case", CASES, ids=lambda c: c.artifact_factory.__name__)

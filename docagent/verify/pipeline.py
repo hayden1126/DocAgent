@@ -44,14 +44,21 @@ class VerifierPipeline:
 
 
 def default_pipeline() -> VerifierPipeline:
+    """The canonical v1 verifier order.
+
+    Stylistic gates (``markdownlint``, ``docs_site``) are non-blocking so a
+    single MD013 line-length nit can't nuke a run before citations check.
+    Truth-checking gates (``citations``, ``links``, ``secrets``) are blocking.
+    The LLM judge is last and non-blocking — it's a tiebreaker, not a gate.
+    """
     from docagent.verify import citations, docs_site, judge, links, markdownlint, secrets
 
     return (
         VerifierPipeline()
-        .add(Gate("markdownlint", markdownlint.check))
-        .add(Gate("links", links.check))
-        .add(Gate("citations", citations.check))
+        .add(Gate("markdownlint", markdownlint.check, blocking=False))
+        .add(Gate("links", links.check, blocking=True))
+        .add(Gate("citations", citations.check, blocking=True))
         .add(Gate("docs_site", docs_site.check, blocking=False))
-        .add(Gate("secrets", secrets.check))
+        .add(Gate("secrets", secrets.check, blocking=True))
         .add(Gate("judge", judge.check, blocking=False))
     )

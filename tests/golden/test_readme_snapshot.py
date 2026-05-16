@@ -19,7 +19,7 @@ import pytest
 
 from docagent.artifacts.readme import ReadmeArtifact
 from docagent.artifacts.registry import GenerationContext
-from docagent.verify import citations
+from docagent.verify import citations, links
 from tests.golden._harness import (
     FIXTURES_DIR,
     RECORDINGS_DIR,
@@ -56,6 +56,15 @@ def test_readme_snapshot_citations_validate(tinylib_root: Path) -> None:
     patch = artifact.generate(artifact.plan(ctx)[0], ctx)
     ok, findings = citations.check(patch, ctx)
     assert ok, f"citation gate failed: {list(findings)}"
+
+
+def test_readme_snapshot_links_validate(tinylib_root: Path) -> None:
+    backend = RecordedBackend(recording_path=RECORDINGS_DIR / "tinylib_readme.txt")
+    artifact = ReadmeArtifact()
+    ctx = GenerationContext(repo_root=tinylib_root, store=None, backend=backend)
+    patch = artifact.generate(artifact.plan(ctx)[0], ctx)
+    ok, findings = links.check(patch, ctx)
+    assert ok, f"link gate failed: {list(findings)}"
 
 
 def test_readme_artifact_stamps_prompt_version(tinylib_root: Path) -> None:
