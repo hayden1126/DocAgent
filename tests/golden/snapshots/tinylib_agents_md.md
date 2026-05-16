@@ -1,0 +1,46 @@
+# tinylib
+
+A tiny Python library used as a DocAgent golden-test fixture; it exposes a
+single Typer-based `greet` command. <!-- ground: tinylib/cli.py:7-13 -->
+
+## Setup
+
+```bash
+pip install -e .
+```
+
+The project uses hatchling as its build backend and targets Python ≥ 3.10. <!-- ground: pyproject.toml:1-3 --> <!-- ground: pyproject.toml:9-9 -->
+
+## Run
+
+```bash
+tinylib greet --name world
+```
+
+`tinylib` installs a console script of the same name. <!-- ground: pyproject.toml:13-14 -->
+
+## Test
+
+No test suite is configured in this fixture. Treat any change as code-only.
+
+## Lint and format
+
+No linter or formatter configuration is present. Match the existing code
+style observed in `tinylib/cli.py`. <!-- ground: tinylib/cli.py:1-13 -->
+
+## Project structure
+
+- `tinylib/__init__.py` — package init; exposes `__version__`. <!-- ground: tinylib/__init__.py:1-3 -->
+- `tinylib/cli.py` — Typer app definition and the `greet` command. <!-- ground: tinylib/cli.py:7-13 -->
+- `pyproject.toml` — build configuration and project metadata. <!-- ground: pyproject.toml:1-14 -->
+- `LICENSE` — MIT license text. <!-- ground: LICENSE:1-7 -->
+
+## Conventions
+
+- Use Typer for CLI commands; declare them with `@app.command()`. <!-- ground: tinylib/cli.py:10-13 -->
+- Module docstrings sit at the top of each file. <!-- ground: tinylib/cli.py:1-1 -->
+- `from __future__ import annotations` is used for forward-reference safety. <!-- ground: tinylib/cli.py:3-3 -->
+
+## Boundaries
+
+Do not modify `LICENSE` — it is the project's MIT license text. <!-- ground: LICENSE:1-1 -->

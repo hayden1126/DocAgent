@@ -1,0 +1,40 @@
+# docagent
+
+> Repository documentation agent for humans and coding agents that produces dual-track output — human-facing files like README and how-to guides alongside agent-facing files like AGENTS.md, CLAUDE.md, and llms.txt — driven by an agentic generation loop with a deterministic-first verifier. <!-- ground: docagent/artifacts/builtins.py:70-101 --> It targets multi-language repositories via tree-sitter adapters and supports incremental, git-diff-driven refreshes. <!-- ground: pyproject.toml:27-33 -->
+
+The package is a Python ≥ 3.11 project that installs a `docagent` console script backed by a Typer CLI; the generation backend wraps the Claude Agent SDK with tools restricted to `Read`, `Glob`, and `Grep`. <!-- ground: pyproject.toml:11-11 --> <!-- ground: pyproject.toml:50-51 --> <!-- ground: docagent/backends/agent_sdk.py:21-37 -->
+
+## Docs
+
+- [README.md](README.md): project overview, install instructions, quickstart, and architecture map. <!-- ground: README.md:1-57 -->
+- [CLAUDE.md](CLAUDE.md): conventions for Claude when working in this repo — grounding rules, gotchas, and where to look. <!-- ground: CLAUDE.md:1-1 -->
+
+## Code
+
+- [docagent/cli.py](docagent/cli.py): Typer app exposing `init`, `update`, and `verify` subcommands. <!-- ground: docagent/cli.py:18-23 -->
+- [docagent/core/orchestrator.py](docagent/core/orchestrator.py): drives `plan → generate → verify → write` across the artifact DAG with a post-write mention-index hook. <!-- ground: docagent/core/orchestrator.py:46-86 -->
+- [docagent/artifacts/builtins.py](docagent/artifacts/builtins.py): registers the v1 artifacts (`readme`, `python_docstrings`, `api_reference`, `how_to_guides`, `agents_md`, `claude_md`, `llms_txt`) and wires their dependency DAG. <!-- ground: docagent/artifacts/builtins.py:7-14 --> <!-- ground: docagent/artifacts/builtins.py:70-101 -->
+- [docagent/artifacts/registry.py](docagent/artifacts/registry.py): artifact base class and registry that stamps `PROMPT_VERSION` into emitted patches. <!-- ground: docagent/artifacts/registry.py:25-31 -->
+- [docagent/backends/agent_sdk.py](docagent/backends/agent_sdk.py): `AgentSDKBackend` wrapping the Claude Agent SDK; tools restricted to `Read/Glob/Grep` with `permission_mode="bypassPermissions"`. <!-- ground: docagent/backends/agent_sdk.py:21-37 -->
+- [docagent/verify/pipeline.py](docagent/verify/pipeline.py): deterministic-first verifier composed of named gates (markdownlint → links → citations → docs_site → secrets → judge). <!-- ground: docagent/verify/pipeline.py:46-57 -->
+- [docagent/verify/citations.py](docagent/verify/citations.py): citations gate that validates `<!-- ground: path:start-end -->` markers against real files and line ranges. <!-- ground: docagent/verify/citations.py:15-39 -->
+- [docagent/artifacts/_cleaners.py](docagent/artifacts/_cleaners.py): `clean_markdown_output` strips outer fences and preamble before writing artifacts. <!-- ground: docagent/artifacts/_cleaners.py:4-9 --> <!-- ground: docagent/artifacts/_cleaners.py:24-40 -->
+- [docagent/ignore.py](docagent/ignore.py): default scanner ignore patterns plus `.docagentignore` extension support. <!-- ground: docagent/ignore.py:9-31 -->
+- [docagent/prompts/](docagent/prompts/): per-artifact prompt modules carrying `PROMPT_VERSION` constants. <!-- ground: docagent/prompts/readme.py:1-1 -->
+
+## Tests
+
+- [tests/golden/_harness.py](tests/golden/_harness.py): snapshot harness with `UPDATE_SNAPSHOTS=1` re-record support. <!-- ground: tests/golden/_harness.py:7-50 -->
+- [tests/golden/test_readme_snapshot.py](tests/golden/test_readme_snapshot.py): golden-snapshot test for the README artifact. <!-- ground: tests/golden/test_readme_snapshot.py:1-1 -->
+- [tests/golden/test_single_file_artifacts_snapshot.py](tests/golden/test_single_file_artifacts_snapshot.py): golden-snapshot tests for `agents_md`, `claude_md`, and `llms_txt`. <!-- ground: tests/golden/test_single_file_artifacts_snapshot.py:1-1 -->
+- [tests/golden/fixtures/tinylib/](tests/golden/fixtures/tinylib/): tiny fixture repo used by the snapshot tests. <!-- ground: tests/golden/fixtures/tinylib/tinylib/cli.py:1-1 -->
+- [tests/unit/test_cleaners.py](tests/unit/test_cleaners.py): unit tests for the Markdown output cleaner. <!-- ground: tests/unit/test_cleaners.py:1-1 -->
+- [tests/unit/test_orchestrator_post_write.py](tests/unit/test_orchestrator_post_write.py): unit tests covering the orchestrator's post-write mention-index hook. <!-- ground: tests/unit/test_orchestrator_post_write.py:1-1 -->
+
+## Optional
+
+- [pyproject.toml](pyproject.toml): package metadata, dependencies, ruff and mypy configuration. <!-- ground: pyproject.toml:1-71 -->
+- [LICENSE](LICENSE): MIT license text. <!-- ground: LICENSE:1-1 -->
+- [docagent/artifacts/llms_txt.py](docagent/artifacts/llms_txt.py): generator for this file. <!-- ground: docagent/artifacts/llms_txt.py:1-1 -->
+- [docagent/index/store.py](docagent/index/store.py): SQLite-backed symbol store used for incremental work. <!-- ground: docagent/index/store.py:1-1 -->
+- [docagent/index/mentions.py](docagent/index/mentions.py): mention-index helpers populated by the orchestrator's post-write hook. <!-- ground: docagent/index/mentions.py:1-1 -->
