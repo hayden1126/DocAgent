@@ -1,5 +1,9 @@
 """Prompt template for the README artifact."""
 
+# Bumped whenever the prompt changes meaningfully. Stamped into the artifact
+# digest so snapshot diffs are interpretable across versions.
+PROMPT_VERSION = "1"
+
 README_PROMPT = """\
 You are generating the top-level README.md for the repository at the current
 working directory.

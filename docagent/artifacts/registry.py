@@ -28,6 +28,7 @@ class DocPatch:
     new_content: bytes
     in_place: bool = False
     citations: tuple[tuple[Path, int, int], ...] = ()
+    prompt_version: str = "0"  # bumped by each prompt module independently
 
 
 @dataclass(frozen=True, slots=True)

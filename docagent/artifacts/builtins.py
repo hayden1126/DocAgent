@@ -6,8 +6,8 @@ patches that depend on this skeleton compiling.
 
 Dependency DAG (v1):
     readme              ←─ (root)
-    python_docstrings   ←─ (root)
-    api_reference       ←─ depends on: python_docstrings
+    python_docstrings   ←─ (root, --experimental gated)
+    api_reference       ←─ (root; reads the symbol index, not docstring text)
     how_to_guides       ←─ depends on: readme, api_reference
     agents_md           ←─ depends on: readme
     claude_md           ←─ depends on: readme
@@ -78,7 +78,7 @@ def register_v1_builtins(registry: Registry) -> None:
         _StubArtifact(
             id="api_reference",
             audience="both",
-            depends_on=("python_docstrings",),
+            depends_on=(),
             target=Path("docs/reference"),
         )
     )

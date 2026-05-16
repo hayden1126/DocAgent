@@ -23,10 +23,13 @@ def test_registry_topo_order_v1():
     order = [a.id for a in reg.topo_order()]
     assert order.index("readme") < order.index("agents_md")
     assert order.index("readme") < order.index("claude_md")
-    assert order.index("python_docstrings") < order.index("api_reference")
     assert order.index("api_reference") < order.index("how_to_guides")
     assert order.index("readme") < order.index("how_to_guides")
     assert order.index("api_reference") < order.index("llms_txt")
+    # api_reference reads the symbol index directly — it must NOT depend on
+    # python_docstrings (which is --experimental and may be skipped).
+    api_ref = reg.get("api_reference")
+    assert "python_docstrings" not in api_ref.depends_on
 
 
 def test_registry_detects_cycle():

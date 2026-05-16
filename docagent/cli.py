@@ -125,6 +125,10 @@ def init(
             console.print(f"  → {verb}: {w.target}")
             if dry_run and w.diff:
                 console.print(w.diff[:4000])
+        if r.digest:
+            console.print(
+                f"  digest={r.digest[:12]}… mentions={r.mention_count}"
+            )
 
     rs = state.RunState.load(repo)
     rs.doc_version = diff.current_head(repo)

@@ -152,6 +152,51 @@ class Store:
                 rows,
             )
 
+    def known_symbol_names(self) -> set[str]:
+        """Set of identifier strings the mention index can intersect against.
+
+        Includes both the full qualified name (e.g. ``Foo.bar``) and the
+        trailing leaf (``bar``) so that prose mentioning either form is caught
+        when the symbol is renamed.
+        """
+        names: set[str] = set()
+        cur = self.conn.execute("SELECT qualified_name FROM symbols")
+        for (qn,) in cur.fetchall():
+            names.add(qn)
+            tail = qn.rsplit(".", 1)[-1]
+            if tail and tail != qn:
+                names.add(tail)
+        return names
+
+    def upsert_artifact(
+        self,
+        artifact_id: str,
+        path: str,
+        digest: str,
+        last_run: str,
+        version: int = 1,
+    ) -> None:
+        with self.transaction() as conn:
+            conn.execute(
+                """
+                INSERT INTO artifacts (id, path, version, last_run, digest)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    path=excluded.path,
+                    version=excluded.version,
+                    last_run=excluded.last_run,
+                    digest=excluded.digest
+                """,
+                (artifact_id, path, version, last_run, digest),
+            )
+
+    def get_artifact_digest(self, artifact_id: str) -> str | None:
+        cur = self.conn.execute(
+            "SELECT digest FROM artifacts WHERE id = ?", (artifact_id,)
+        )
+        row = cur.fetchone()
+        return row[0] if row else None
+
 
 def open_store(repo_root: Path) -> Store:
     return Store(repo_root / ".docagent" / "index.db")
