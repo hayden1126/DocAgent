@@ -25,7 +25,7 @@ from docagent.artifacts.agents_md import AgentsMdArtifact
 from docagent.artifacts.claude_md import ClaudeMdArtifact
 from docagent.artifacts.llms_txt import LlmsTxtArtifact
 from docagent.artifacts.registry import GenerationContext
-from docagent.verify import citations, links
+from docagent.verify import citations, links, markdownlint
 from tests.golden._harness import (
     FIXTURES_DIR,
     RECORDINGS_DIR,
@@ -82,6 +82,22 @@ def test_snapshot_links_validate(case: _Case, tinylib_root: Path) -> None:
     patch = artifact.generate(artifact.plan(ctx)[0], ctx)
     ok, findings = links.check(patch, ctx)
     assert ok, f"link gate failed for {case.artifact_factory.__name__}: {list(findings)}"
+
+
+@pytest.mark.parametrize("case", CASES, ids=lambda c: c.artifact_factory.__name__)
+def test_snapshot_markdownlint(case: _Case, tinylib_root: Path) -> None:
+    """The committed snapshot must pass markdownlint (MD013 excluded).
+
+    Skipped if pymarkdown is not installed; tests/unit covers the gate logic.
+    """
+    if markdownlint._find_binary() is None:
+        pytest.skip("pymarkdown not installed")
+    backend = RecordedBackend(recording_path=RECORDINGS_DIR / case.recording_name)
+    artifact = case.artifact_factory()
+    ctx = GenerationContext(repo_root=tinylib_root, store=None, backend=backend)
+    patch = artifact.generate(artifact.plan(ctx)[0], ctx)
+    ok, findings = markdownlint.check(patch, ctx)
+    assert ok, f"markdownlint failed for {case.artifact_factory.__name__}: {list(findings)}"
 
 
 @pytest.mark.parametrize("case", CASES, ids=lambda c: c.artifact_factory.__name__)
