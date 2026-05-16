@@ -197,6 +197,32 @@ class Store:
         row = cur.fetchone()
         return row[0] if row else None
 
+    def list_artifacts(self) -> list[tuple[str, str, str]]:
+        """Return rows of ``(id, path, digest)`` for all known artifacts."""
+        cur = self.conn.execute("SELECT id, path, digest FROM artifacts ORDER BY id")
+        return list(cur.fetchall())
+
+    def artifact_paths(self) -> set[str]:
+        """Set of relative paths registered in the artifacts table.
+
+        Used by ``update`` mode to skip files that ARE artifacts — we never
+        treat a user's edit to a generated README as a "source change" worth
+        re-running anything on.
+        """
+        cur = self.conn.execute("SELECT path FROM artifacts")
+        return {row[0] for row in cur.fetchall()}
+
+    def symbols_for_file(self, file: str) -> list[tuple[str, str]]:
+        """Return ``(qualified_name, kind)`` rows recorded for ``file``.
+
+        Called before re-indexing during ``update`` so the orchestrator can
+        compute the set of removed/renamed symbols.
+        """
+        cur = self.conn.execute(
+            "SELECT qualified_name, kind FROM symbols WHERE file = ?", (file,)
+        )
+        return list(cur.fetchall())
+
 
 def open_store(repo_root: Path) -> Store:
     return Store(repo_root / ".docagent" / "index.db")
