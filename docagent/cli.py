@@ -45,28 +45,21 @@ def _root(
     pass
 
 
-@app.command()
-def init(
-    repo: Path = typer.Option(Path.cwd(), "--repo", "-C", help="Repository root."),
-) -> None:
-    """Full pass: scan repo, build index, generate all artifacts."""
-    console.print(f"[bold]init[/bold] {repo}")
+def _index_repo(repo: Path, store, now: str) -> tuple[int, int]:
     scanner = Scanner(repo)
-    store = open_store(repo)
-
     n_files = 0
     n_symbols = 0
-    now = datetime.now(timezone.utc).isoformat()
     for scanned in scanner.walk():
         n_files += 1
         parsed = scanned.adapter.parse(scanned.path, scanned.path.read_bytes())
         symbols = scanned.adapter.extract_symbols(parsed)
         n_symbols += len(symbols)
+        rel = str(scanned.path.relative_to(repo)) if scanned.path.is_absolute() else str(scanned.path)
         rows = [
             (
                 s.qualified_name,
                 s.kind,
-                str(s.file.relative_to(repo)) if s.file.is_absolute() else str(s.file),
+                rel,
                 s.byte_start,
                 s.byte_end,
                 s.line_start,
@@ -78,16 +71,60 @@ def init(
             )
             for s in symbols
         ]
-        rel = str(scanned.path.relative_to(repo)) if scanned.path.is_absolute() else str(scanned.path)
         store.replace_symbols_for_file(rel, rows)
         store.upsert_file_hash(rel, scanned.sha256, scanned.adapter.language_id, now)
+    return n_files, n_symbols
 
-    console.print(f"indexed [cyan]{n_files}[/cyan] files, [cyan]{n_symbols}[/cyan] symbols")
+
+@app.command()
+def init(
+    repo: Path = typer.Option(Path.cwd(), "--repo", "-C", help="Repository root."),
+    only: list[str] = typer.Option(
+        [], "--only", help="Restrict to one or more artifact ids (repeatable)."
+    ),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Print diffs; do not write."),
+    skip_index: bool = typer.Option(
+        False, "--skip-index", help="Skip the symbol index rebuild (use existing .docagent/index.db)."
+    ),
+) -> None:
+    """Full pass: scan repo, build index, generate all artifacts."""
+    from docagent.backends.agent_sdk import AgentSDKBackend
+    from docagent.core.orchestrator import Orchestrator
+
+    console.print(f"[bold]init[/bold] {repo}")
+    store = open_store(repo)
+    now = datetime.now(timezone.utc).isoformat()
+
+    if not skip_index:
+        n_files, n_symbols = _index_repo(repo, store, now)
+        console.print(f"indexed [cyan]{n_files}[/cyan] files, [cyan]{n_symbols}[/cyan] symbols")
+    else:
+        console.print("[yellow]skip-index[/yellow] — using existing index")
 
     registry = _registry()
-    order = registry.topo_order()
-    console.print(f"artifacts (topo order): {[a.id for a in order]}")
-    console.print("[yellow]note:[/yellow] artifact generation is not yet wired (v1 scaffold).")
+    backend = AgentSDKBackend()
+    orchestrator = Orchestrator(
+        repo_root=repo,
+        registry=registry,
+        backend=backend,
+        store=store,
+        only=tuple(only),
+        dry_run=dry_run,
+    )
+    runs = orchestrator.run()
+    for r in runs:
+        status = "ok" if r.verify_ok and r.error is None else "FAIL"
+        color = "green" if status == "ok" else "red"
+        console.print(f"[{color}]{status}[/{color}] {r.artifact_id}")
+        if r.error:
+            console.print(f"  [red]error:[/red] {r.error}")
+        for f in r.findings[:10]:
+            console.print(f"  • {f}")
+        for w in r.writes:
+            verb = "would write" if dry_run else ("wrote" if w.written else "unchanged")
+            console.print(f"  → {verb}: {w.target}")
+            if dry_run and w.diff:
+                console.print(w.diff[:4000])
 
     rs = state.RunState.load(repo)
     rs.doc_version = diff.current_head(repo)

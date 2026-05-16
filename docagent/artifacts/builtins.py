@@ -19,6 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from docagent.artifacts.readme import ReadmeArtifact
 from docagent.artifacts.registry import (
     Audience,
     DocPatch,
@@ -64,14 +65,7 @@ class PythonDocstringsArtifact(_StubArtifact):
 
 
 def register_v1_builtins(registry: Registry) -> None:
-    registry.register(
-        _StubArtifact(
-            id="readme",
-            audience="human",
-            depends_on=(),
-            target=Path("README.md"),
-        )
-    )
+    registry.register(ReadmeArtifact())
     registry.register(
         PythonDocstringsArtifact(
             id="python_docstrings",

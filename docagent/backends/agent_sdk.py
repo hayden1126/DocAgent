@@ -1,39 +1,89 @@
-"""Claude Agent SDK backend — the canonical v1 backend.
+"""Claude Agent SDK backend.
 
-Lazy-imports the SDK so unit tests and `--help` work without it installed.
-The actual tool-use loop wiring is intentionally TODO: the SDK's surface has
-moved in recent releases and the integration deserves a dedicated patch with
-prompt caching enabled.
+Wraps the async `claude_agent_sdk.query()` in a synchronous interface. The
+SDK speaks to the local `claude` CLI, so prompt caching, tool scoping, and
+sandboxing are all delegated to it.
+
+For read-only artifact generation (README, AGENTS.md, llms.txt, CLAUDE.md,
+docs/) we pass `permission_mode="bypassPermissions"` and restrict tools to
+Read/Glob/Grep. In-place artifacts that mutate source (python_docstrings)
+will use a separate, narrower configuration when wired.
 """
 
 from __future__ import annotations
 
+import asyncio
+from dataclasses import dataclass, field
+
 from docagent.backends.base import GenerationRequest, GenerationResponse
 
 
+@dataclass
 class AgentSDKBackend:
-    name = "claude-agent-sdk"
+    name: str = "claude-agent-sdk"
+    model: str | None = None  # None ⇒ SDK default
+    system_prompt: str = (
+        "You are DocAgent, an autonomous repository documentation agent. "
+        "Use the Read, Glob, and Grep tools to inspect the repository at the "
+        "current working directory. Produce accurate, concise documentation "
+        "grounded in real code. Every non-trivial factual claim must carry a "
+        "`<!-- ground: path:line-start-line-end -->` HTML comment immediately "
+        "after the sentence it grounds; paths are relative to the repo root. "
+        "Do not invent files, symbols, commands, or behavior you have not "
+        "verified by reading the source."
+    )
+    tools: tuple[str, ...] = ("Read", "Glob", "Grep")
+    max_turns: int = 24
+    permission_mode: str = "bypassPermissions"
 
-    def __init__(
-        self,
-        model: str = "claude-opus-4-7",
-        system_prompt: str | None = None,
-        enable_cache: bool = True,
-    ) -> None:
-        self.model = model
-        self.system_prompt = system_prompt or (
-            "You are DocAgent, an autonomous repository documentation agent. "
-            "Read the repo using the available tools and produce accurate, "
-            "grounded documentation. Every non-trivial claim must carry a "
-            "<!-- ground: path:line-range --> citation."
-        )
-        self.enable_cache = enable_cache
+    extras: dict[str, object] = field(default_factory=dict)
 
     def run(self, request: GenerationRequest) -> GenerationResponse:
-        # TODO: wire claude_agent_sdk.ClaudeAgent with Read/Grep/Glob/Edit tools
-        # scoped to request.repo_root, run the loop up to max_iterations, and
-        # return the final assistant message. Enable cache_control on the
-        # system prompt when self.enable_cache is True.
-        raise NotImplementedError(
-            "AgentSDKBackend.run is not yet wired. See docagent/backends/agent_sdk.py."
+        return asyncio.run(self._run_async(request))
+
+    async def _run_async(self, request: GenerationRequest) -> GenerationResponse:
+        from claude_agent_sdk import (
+            AssistantMessage,
+            ClaudeAgentOptions,
+            ResultMessage,
+            TextBlock,
+            query,
+        )
+
+        options = ClaudeAgentOptions(
+            system_prompt=self.system_prompt,
+            tools=list(self.tools),
+            allowed_tools=list(self.tools),
+            permission_mode=self.permission_mode,  # type: ignore[arg-type]
+            cwd=str(request.repo_root),
+            max_turns=self.max_turns,
+            model=self.model,
+        )
+
+        chunks: list[str] = []
+        tool_calls = 0
+        input_tokens = 0
+        output_tokens = 0
+
+        async for msg in query(prompt=request.prompt, options=options):
+            if isinstance(msg, AssistantMessage):
+                for block in msg.content:
+                    if isinstance(block, TextBlock):
+                        chunks.append(block.text)
+                    else:
+                        # ToolUseBlock, ThinkingBlock, etc. — count tool calls
+                        if type(block).__name__ == "ToolUseBlock":
+                            tool_calls += 1
+            elif isinstance(msg, ResultMessage):
+                usage = getattr(msg, "usage", None)
+                if usage:
+                    input_tokens = getattr(usage, "input_tokens", 0) or 0
+                    output_tokens = getattr(usage, "output_tokens", 0) or 0
+
+        content = "\n".join(chunks).strip()
+        return GenerationResponse(
+            content=content,
+            tool_calls=tool_calls,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
         )
