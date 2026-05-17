@@ -112,8 +112,11 @@ class AgentSDKBackend:
             elif isinstance(msg, ResultMessage):
                 usage = getattr(msg, "usage", None)
                 if usage:
-                    input_tokens = getattr(usage, "input_tokens", 0) or 0
-                    output_tokens = getattr(usage, "output_tokens", 0) or 0
+                    # `usage` is `dict[str, Any] | None` per claude_agent_sdk
+                    # types.py; the previous `getattr` form silently returned 0.
+                    # `or 0` defends against the value itself being None.
+                    input_tokens = usage.get("input_tokens", 0) or 0
+                    output_tokens = usage.get("output_tokens", 0) or 0
 
         content = "\n".join(chunks).strip()
         _log.debug(
