@@ -10,6 +10,7 @@ from typing import Iterator
 from docagent.adapters.base import LanguageAdapter
 from docagent.adapters.fallback import EXTENSIONS as FALLBACK_EXTENSIONS, FallbackAdapter
 from docagent.adapters.python import PythonAdapter
+from docagent.adapters.typescript import TypeScriptAdapter
 from docagent.ignore import IgnoreMatcher
 
 
@@ -25,6 +26,9 @@ def _build_adapter_index() -> dict[str, LanguageAdapter]:
     py = PythonAdapter()
     for ext in py.file_extensions:
         adapters[ext] = py
+    ts_adapter = TypeScriptAdapter()
+    for ext in ts_adapter.file_extensions:
+        adapters[ext] = ts_adapter
     for lang in FALLBACK_EXTENSIONS:
         adapter = FallbackAdapter(lang)
         for ext in adapter.file_extensions:

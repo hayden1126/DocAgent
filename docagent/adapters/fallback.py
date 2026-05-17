@@ -35,12 +35,6 @@ GENERIC_QUERIES: dict[str, str] = {
         (method_declaration name: (field_identifier) @name) @def
         (type_declaration (type_spec name: (type_identifier) @name)) @def
     """,
-    "typescript": """
-        (function_declaration name: (identifier) @name) @def
-        (class_declaration name: (type_identifier) @name) @def
-        (interface_declaration name: (type_identifier) @name) @def
-        (method_definition name: (property_identifier) @name) @def
-    """,
     "java": """
         (class_declaration name: (identifier) @name) @def
         (method_declaration name: (identifier) @name) @def
@@ -56,7 +50,6 @@ GENERIC_QUERIES: dict[str, str] = {
 EXTENSIONS: dict[str, tuple[str, ...]] = {
     "rust": (".rs",),
     "go": (".go",),
-    "typescript": (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"),
     "java": (".java",),
     "cpp": (".cc", ".cpp", ".cxx", ".hpp", ".hh", ".h"),
 }
@@ -64,7 +57,6 @@ EXTENSIONS: dict[str, tuple[str, ...]] = {
 DOC_STYLES: dict[str, DocStyle] = {
     "rust": DocStyle(delim_open="", delim_close="", line_prefix="/// ", placement="above"),
     "go": DocStyle(delim_open="", delim_close="", line_prefix="// ", placement="above"),
-    "typescript": DocStyle(delim_open="/**", delim_close=" */", line_prefix=" * ", placement="above"),
     "java": DocStyle(delim_open="/**", delim_close=" */", line_prefix=" * ", placement="above"),
     "cpp": DocStyle(delim_open="/**", delim_close=" */", line_prefix=" * ", placement="above"),
 }
@@ -82,12 +74,6 @@ KIND_MAP: dict[str, dict[str, str]] = {
         "function_declaration": "function",
         "method_declaration": "method",
         "type_declaration": "type_alias",
-    },
-    "typescript": {
-        "function_declaration": "function",
-        "class_declaration": "class",
-        "interface_declaration": "interface",
-        "method_definition": "method",
     },
     "java": {
         "class_declaration": "class",
