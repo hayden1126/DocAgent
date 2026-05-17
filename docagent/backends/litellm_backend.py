@@ -19,6 +19,7 @@ import fnmatch
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -212,6 +213,16 @@ class LiteLLMBackend:
                     f"Ensure the appropriate API key env var is set (GEMINI_API_KEY, "
                     f"OPENROUTER_API_KEY, or ANTHROPIC_API_KEY)."
                 ) from exc
+            except litellm.RateLimitError:  # type: ignore[attr-defined]
+                # One bounded retry. Spike code lets RateLimitError bubble;
+                # production wants graceful handling of transient throttling.
+                # If THIS attempt raises (RateLimitError or anything else),
+                # let it propagate — compounding retries make rate-limited
+                # provider bills worse, not better.
+                time.sleep(2)
+                response = completion(**completion_kwargs)
+            # BadRequestError NOT caught here — bad input is not transient;
+            # let it propagate to the orchestrator's exception handler.
             usage = getattr(response, "usage", None)
             if usage is not None:
                 input_tokens += getattr(usage, "prompt_tokens", 0) or 0
