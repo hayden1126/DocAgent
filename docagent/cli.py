@@ -170,6 +170,11 @@ def init(
         "--max-modules",
         help="Cap on per-module artifacts (e.g. api_reference). 0 = unlimited.",
     ),
+    max_howtos: int = typer.Option(
+        15,
+        "--max-howtos",
+        help="Cap on how-to-guide pages. 0 = unlimited.",
+    ),
     max_cost: float = typer.Option(
         0.0,
         "--max-cost",
@@ -213,7 +218,7 @@ def init(
         store=store,
         only=tuple(only),
         dry_run=dry_run,
-        config={"max_modules": max_modules},
+        config={"max_modules": max_modules, "max_howtos": max_howtos},
         max_cost=effective_cap,
         console=console,
     )
@@ -237,6 +242,13 @@ def init(
                 f"  digest={r.digest[:12]}… mentions={r.mention_count}"
             )
 
+    last_ctx_config = getattr(orchestrator, "_last_ctx_config", None) or {}
+    orphans = last_ctx_config.get("how_to_orphans") or []
+    if orphans:
+        console.print("[yellow]Flagged orphans:[/yellow]")
+        for o in orphans:
+            console.print(f"  • {o}")
+
     wall = time.monotonic() - start_time
     expected_total = len(registry.topo_order(list(only) if only else None))
     _render_summary(
@@ -259,6 +271,11 @@ def update(
     dry_run: bool = typer.Option(False, "--dry-run", help="Print diffs; do not write."),
     only: list[str] = typer.Option(
         [], "--only", help="Restrict to one or more artifact ids (repeatable)."
+    ),
+    max_howtos: int = typer.Option(
+        15,
+        "--max-howtos",
+        help="Cap on how-to-guide pages. 0 = unlimited.",
     ),
     max_cost: float = typer.Option(
         0.0,
@@ -386,6 +403,7 @@ def update(
         changed_files=tuple(changed),
         only=tuple(affected),
         dry_run=dry_run,
+        config={"max_howtos": max_howtos},
         max_cost=effective_cap,
         console=console,
     )
@@ -406,6 +424,13 @@ def update(
                 console.print(w.diff[:4000])
         if r.digest:
             console.print(f"  digest={r.digest[:12]}… mentions={r.mention_count}")
+
+    last_ctx_config = getattr(orchestrator, "_last_ctx_config", None) or {}
+    orphans = last_ctx_config.get("how_to_orphans") or []
+    if orphans:
+        console.print("[yellow]Flagged orphans:[/yellow]")
+        for o in orphans:
+            console.print(f"  • {o}")
 
     wall = time.monotonic() - start_time
     _render_summary(

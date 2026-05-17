@@ -22,6 +22,7 @@ from pathlib import Path
 from docagent.artifacts.agents_md import AgentsMdArtifact
 from docagent.artifacts.api_reference import ApiReferenceArtifact
 from docagent.artifacts.claude_md import ClaudeMdArtifact
+from docagent.artifacts.how_to_guides import HowToGuidesArtifact
 from docagent.artifacts.llms_txt import LlmsTxtArtifact
 from docagent.artifacts.readme import ReadmeArtifact
 from docagent.artifacts.registry import (
@@ -79,14 +80,7 @@ def register_v1_builtins(registry: Registry) -> None:
         )
     )
     registry.register(ApiReferenceArtifact())
-    registry.register(
-        _StubArtifact(
-            id="how_to_guides",
-            audience="human",
-            depends_on=("readme", "api_reference"),
-            target=Path("docs/how-to"),
-        )
-    )
+    registry.register(HowToGuidesArtifact())
     registry.register(AgentsMdArtifact())
     registry.register(ClaudeMdArtifact())
     registry.register(LlmsTxtArtifact())

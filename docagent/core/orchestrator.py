@@ -124,6 +124,10 @@ class Orchestrator:
             changed_files=self.changed_files,
             config=dict(self.config),
         )
+        # Expose the per-run ctx config so callers (CLI) can read post-run
+        # artifact-emitted entries like `how_to_orphans`. Not part of the
+        # public ArtifactRun shape — those are per-artifact aggregates.
+        self._last_ctx_config = ctx.config
 
         subset = list(self.only) if self.only else None
         order: list[DocArtifact] = self.registry.topo_order(subset)
