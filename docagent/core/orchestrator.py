@@ -153,6 +153,21 @@ class Orchestrator:
                 runs.append(run)
                 continue
 
+            # Drain any backend responses produced inside plan() (e.g.
+            # how_to_guides' discovery call) BEFORE the per-task loop's
+            # clear discards them. Iterate ALL entries (future-proofing
+            # for plan() with multiple calls), then clear.
+            if not self.dry_run:
+                for r in last_responses:
+                    per_call_cost = self.tracker.add(
+                        model, r.input_tokens, r.output_tokens, r.tool_calls
+                    )
+                    run.input_tokens += r.input_tokens
+                    run.output_tokens += r.output_tokens
+                    run.tool_calls += r.tool_calls
+                    run.cost_usd += per_call_cost
+            last_responses.clear()
+
             multi_task = len(tasks) > 1
             for i, task in enumerate(tasks):
                 try:
