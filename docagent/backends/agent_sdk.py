@@ -74,7 +74,6 @@ class AgentSDKBackend:
             from claude_agent_sdk import (
                 AssistantMessage,
                 ClaudeAgentOptions,
-                ResultMessage,
                 TextBlock,
                 query,
             )
@@ -109,14 +108,12 @@ class AgentSDKBackend:
                         # ToolUseBlock, ThinkingBlock, etc. — count tool calls
                         if type(block).__name__ == "ToolUseBlock":
                             tool_calls += 1
-            elif isinstance(msg, ResultMessage):
-                usage = getattr(msg, "usage", None)
-                if usage:
-                    # `usage` is `dict[str, Any] | None` per claude_agent_sdk
-                    # types.py; the previous `getattr` form silently returned 0.
-                    # `or 0` defends against the value itself being None.
-                    input_tokens = usage.get("input_tokens", 0) or 0
-                    output_tokens = usage.get("output_tokens", 0) or 0
+                # AssistantMessage.usage is per-turn; accumulate across the
+                # full agentic loop. Reading only the final ResultMessage.usage
+                # missed every intermediate turn's input tokens.
+                usage = getattr(msg, "usage", None) or {}
+                input_tokens += usage.get("input_tokens", 0) or 0
+                output_tokens += usage.get("output_tokens", 0) or 0
 
         content = "\n".join(chunks).strip()
         _log.debug(
