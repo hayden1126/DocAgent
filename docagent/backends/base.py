@@ -26,6 +26,12 @@ class GenerationResponse:
     tool_calls: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
+    # Phase 8: per-call cost USD, populated by `LiteLLMBackend` via the
+    # `_litellm_pricing.cost_for_response` shim. `None` means "pricing not
+    # attached" (SDK path); a float (incl. 0.0) means "backend already
+    # computed cost." The orchestrator threads this through `BudgetTracker.add`
+    # as the `external_cost` override.
+    cost_usd: float | None = None
 
 
 @runtime_checkable
