@@ -1,0 +1,20 @@
+{
+  "model": "ollama_chat/llama3.1:8b",
+  "fixture": "tests/golden/fixtures/tinylib_ts",
+  "duration_sec": 34.34,
+  "content_chars": 1707,
+  "tool_calls": 0,
+  "input_tokens": 488,
+  "output_tokens": 431,
+  "citations_total": 1,
+  "citations_resolved": 0,
+  "citation_emission_rate": 0.0,
+  "verdict": "drop_from_backend_01",
+  "unresolved": [
+    {
+      "path": "index.d.ts",
+      "line_start": 1,
+      "line_end": 3
+    }
+  ]
+}
