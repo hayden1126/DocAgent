@@ -1,0 +1,4 @@
+[
+  {"title": "Run docagent in CI", "sources": ["README.md:1-40"]},
+  {"title": "Extend docagent with a new artifact", "sources": ["docs/reference/tinylib.cli.md:1-30"]}
+]
