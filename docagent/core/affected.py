@@ -19,24 +19,13 @@ we never want to fight a user's hand-edit by regenerating.
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import Iterable
 
 from docagent.artifacts.registry import Registry
+from docagent.citations import cited_paths
+from docagent.core.paths import try_repo_rel_posix
 from docagent.index.store import Store
-
-_CITATION_RE = re.compile(rb"<!--\s*ground:\s*([^:\s]+):\d+(?:-\d+)?\s*-->")
-
-
-def _rel(repo_root: Path, p: Path) -> str:
-    """Return repo-relative POSIX-style path for ``p``."""
-    if p.is_absolute():
-        try:
-            p = p.relative_to(repo_root)
-        except ValueError:
-            return str(p)
-    return p.as_posix()
 
 
 def _identifier_names(qn: str) -> set[str]:
@@ -59,8 +48,8 @@ def _split_changed_files(
     artifact_hits: set[str] = set()
     seen: set[str] = set()
     for p in changed_files:
-        rel = _rel(repo_root, p)
-        if rel in seen:
+        rel = try_repo_rel_posix(repo_root, p)
+        if rel is None or rel in seen:
             continue
         seen.add(rel)
         if rel in artifact_paths:
@@ -121,8 +110,8 @@ def compute_affected_artifacts(
             content = absolute.read_bytes()
         except OSError:
             continue
-        cited_paths = {m.group(1).decode("utf-8", "replace") for m in _CITATION_RE.finditer(content)}
-        if cited_paths & changed_set:
+        cited = cited_paths(content)
+        if cited & changed_set:
             aid = artifact_id_by_path.get(art_rel)
             if aid is not None:
                 affected.add(aid)

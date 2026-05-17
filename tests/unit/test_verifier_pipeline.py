@@ -41,9 +41,38 @@ def test_stylistic_failure_does_not_block_truth_gates() -> None:
         GenerationContext(repo_root=Path("/tmp"), store=None, backend=None),
     )
     assert calls.seen == ["style", "truth"]
-    # Non-blocking failures count as ok=False overall (findings still surface).
-    assert result.ok is False
+    # Non-blocking failures contribute findings but do NOT flip ok — that's
+    # what blocking=False means. The CLI's --strict flag re-tightens to
+    # "fail on any finding" at the call site, not in the pipeline.
+    assert result.ok is True
     assert any("stylistic nit" in f for f in result.findings)
+
+
+def test_non_blocking_alone_keeps_ok_true() -> None:
+    """A non-blocking gate failing in isolation must not produce ok=False."""
+
+    def style_fail(patch, ctx):
+        return False, ("nit",)
+
+    pipeline = VerifierPipeline().add(Gate("style", style_fail, blocking=False))
+    result = pipeline.run(
+        DocPatch("x", Path("/tmp/x"), b""),
+        GenerationContext(repo_root=Path("/tmp"), store=None, backend=None),
+    )
+    assert result.ok is True
+    assert result.findings == ("[style] nit",)
+
+
+def test_blocking_failure_flips_ok() -> None:
+    def truth_fail(patch, ctx):
+        return False, ("broken",)
+
+    pipeline = VerifierPipeline().add(Gate("truth", truth_fail, blocking=True))
+    result = pipeline.run(
+        DocPatch("x", Path("/tmp/x"), b""),
+        GenerationContext(repo_root=Path("/tmp"), store=None, backend=None),
+    )
+    assert result.ok is False
 
 
 def test_blocking_failure_short_circuits_pipeline() -> None:

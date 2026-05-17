@@ -1,0 +1,27 @@
+name: docagent verify
+
+# Self-hosting: DocAgent runs its own Action against its own docs on every
+# push to main and on every pull request. The verifier reads README.md,
+# AGENTS.md (if present), CLAUDE.md, and llms.txt, checks each
+# `<!-- ground: file:lines -->` citation against the cited source, and
+# fails the build on broken grounding, dead links, or leaked secrets.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify documentation
+        uses: ./
+        with:
+          strict: 'false'

@@ -13,9 +13,27 @@ will use a separate, narrower configuration when wired.
 from __future__ import annotations
 
 import asyncio
+import shutil
 from dataclasses import dataclass, field
 
+from docagent._logging import get_logger
 from docagent.backends.base import GenerationRequest, GenerationResponse
+
+_log = get_logger("backend.agent_sdk")
+
+
+class BackendUnavailableError(RuntimeError):
+    """Raised when the backend's runtime dependencies are missing.
+
+    Carries an actionable install/setup hint suitable for direct CLI display.
+    """
+
+
+_CLAUDE_INSTALL_HINT = (
+    "DocAgent's Claude Agent SDK backend requires the `claude` CLI on PATH.\n"
+    "Install Claude Code: https://docs.claude.com/en/docs/claude-code/setup\n"
+    "Or set DOCAGENT_BACKEND=<other> once additional backends are supported."
+)
 
 
 @dataclass
@@ -39,16 +57,33 @@ class AgentSDKBackend:
     extras: dict[str, object] = field(default_factory=dict)
 
     def run(self, request: GenerationRequest) -> GenerationResponse:
-        return asyncio.run(self._run_async(request))
+        self._preflight()
+        try:
+            return asyncio.run(self._run_async(request))
+        except FileNotFoundError as exc:
+            # The SDK shells out to `claude`; FileNotFoundError surfaces if
+            # the CLI is missing or its dependencies aren't on PATH.
+            raise BackendUnavailableError(_CLAUDE_INSTALL_HINT) from exc
+
+    def _preflight(self) -> None:
+        if shutil.which("claude") is None:
+            raise BackendUnavailableError(_CLAUDE_INSTALL_HINT)
 
     async def _run_async(self, request: GenerationRequest) -> GenerationResponse:
-        from claude_agent_sdk import (
-            AssistantMessage,
-            ClaudeAgentOptions,
-            ResultMessage,
-            TextBlock,
-            query,
-        )
+        try:
+            from claude_agent_sdk import (
+                AssistantMessage,
+                ClaudeAgentOptions,
+                ResultMessage,
+                TextBlock,
+                query,
+            )
+        except ImportError as exc:
+            raise BackendUnavailableError(
+                "The `claude-agent-sdk` package is not installed. "
+                "Install it with `pip install claude-agent-sdk` "
+                "(already a DocAgent dependency — re-install with `pip install -e .`)."
+            ) from exc
 
         options = ClaudeAgentOptions(
             system_prompt=self.system_prompt,
@@ -81,6 +116,10 @@ class AgentSDKBackend:
                     output_tokens = getattr(usage, "output_tokens", 0) or 0
 
         content = "\n".join(chunks).strip()
+        _log.debug(
+            "agent_sdk %s: %d tool_calls, %d in, %d out tokens, %d chars",
+            request.artifact_id, tool_calls, input_tokens, output_tokens, len(content),
+        )
         return GenerationResponse(
             content=content,
             tool_calls=tool_calls,

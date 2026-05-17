@@ -9,9 +9,11 @@ import typer
 from rich.console import Console
 
 from docagent import __version__
+from docagent._logging import setup_logging
 from docagent.artifacts.builtins import register_v1_builtins
 from docagent.artifacts.registry import Registry
 from docagent.core import diff, state
+from docagent.core.paths import to_repo_rel_posix
 from docagent.core.scanner import Scanner
 from docagent.index.store import open_store
 
@@ -41,8 +43,11 @@ def _root(
     version: bool = typer.Option(
         False, "--version", callback=_version_callback, is_eager=True, help="Show version and exit."
     ),
+    debug: bool = typer.Option(
+        False, "--debug", help="Emit DEBUG-level logs to stderr (also: DOCAGENT_DEBUG=1)."
+    ),
 ) -> None:
-    pass
+    setup_logging(debug=debug)
 
 
 def _index_repo(repo: Path, store, now: str) -> tuple[int, int]:
@@ -54,7 +59,7 @@ def _index_repo(repo: Path, store, now: str) -> tuple[int, int]:
         parsed = scanned.adapter.parse(scanned.path, scanned.path.read_bytes())
         symbols = scanned.adapter.extract_symbols(parsed)
         n_symbols += len(symbols)
-        rel = str(scanned.path.relative_to(repo)) if scanned.path.is_absolute() else str(scanned.path)
+        rel = to_repo_rel_posix(repo, scanned.path)
         rows = [
             (
                 s.qualified_name,
@@ -88,7 +93,7 @@ def init(
     ),
 ) -> None:
     """Full pass: scan repo, build index, generate all artifacts."""
-    from docagent.backends.agent_sdk import AgentSDKBackend
+    from docagent.backends.agent_sdk import AgentSDKBackend, BackendUnavailableError
     from docagent.core.orchestrator import Orchestrator
 
     console.print(f"[bold]init[/bold] {repo}")
@@ -103,6 +108,14 @@ def init(
 
     registry = _registry()
     backend = AgentSDKBackend()
+    preflight = getattr(backend, "_preflight", None)
+    if preflight is not None:
+        try:
+            preflight()
+        except BackendUnavailableError as exc:
+            console.print(f"[red]{exc}[/red]")
+            store.close()
+            raise typer.Exit(code=2) from exc
     orchestrator = Orchestrator(
         repo_root=repo,
         registry=registry,
@@ -146,7 +159,7 @@ def update(
     ),
 ) -> None:
     """Incremental refresh: regenerate artifacts affected by changes since the last run."""
-    from docagent.backends.agent_sdk import AgentSDKBackend
+    from docagent.backends.agent_sdk import AgentSDKBackend, BackendUnavailableError
     from docagent.core.affected import compute_affected_artifacts
     from docagent.core.orchestrator import Orchestrator
     from docagent.core.scanner import Scanner
@@ -183,9 +196,7 @@ def update(
 
     for p in changed:
         if not p.exists() or not p.is_file():
-            new_symbols_by_file[
-                str(p.relative_to(repo)) if p.is_absolute() else str(p)
-            ] = set()
+            new_symbols_by_file[to_repo_rel_posix(repo, p)] = set()
             continue
         adapter = by_ext.get(p.suffix)
         if adapter is None:
@@ -196,7 +207,7 @@ def update(
             continue
         parsed = adapter.parse(p, data)
         new_syms = adapter.extract_symbols(parsed)
-        rel = str(p.relative_to(repo)) if p.is_absolute() else str(p)
+        rel = to_repo_rel_posix(repo, p)
         new_symbols_by_file[rel] = {s.qualified_name for s in new_syms}
 
     affected = compute_affected_artifacts(repo, store, changed, new_symbols_by_file, registry)
@@ -223,7 +234,7 @@ def update(
         data = p.read_bytes()
         parsed = adapter.parse(p, data)
         syms = adapter.extract_symbols(parsed)
-        rel = str(p.relative_to(repo)) if p.is_absolute() else str(p)
+        rel = to_repo_rel_posix(repo, p)
         sha = _hashlib.sha256(data).hexdigest()
         rows = [
             (
@@ -245,6 +256,14 @@ def update(
         store.upsert_file_hash(rel, sha, adapter.language_id, now)
 
     backend = AgentSDKBackend()
+    preflight = getattr(backend, "_preflight", None)
+    if preflight is not None:
+        try:
+            preflight()
+        except BackendUnavailableError as exc:
+            console.print(f"[red]{exc}[/red]")
+            store.close()
+            raise typer.Exit(code=2) from exc
     orchestrator = Orchestrator(
         repo_root=repo,
         registry=registry,
@@ -281,15 +300,99 @@ def update(
 @app.command()
 def verify(
     repo: Path = typer.Option(Path.cwd(), "--repo", "-C", help="Repository root."),
-    strict: bool = typer.Option(False, "--strict", help="Fail on any warning."),
+    strict: bool = typer.Option(False, "--strict", help="Fail on any finding, even non-blocking."),
+    only: list[str] = typer.Option(
+        [], "--only", help="Restrict to one or more artifact ids (repeatable)."
+    ),
 ) -> None:
-    """Run the deterministic-first verifier pipeline against existing artifacts."""
+    """Run the deterministic-first verifier pipeline against on-disk artifacts.
+
+    Reads each artifact recorded in ``.docagent/index.db`` (or registered in
+    the registry, whichever subset ``--only`` intersects), synthesizes a
+    ``DocPatch`` from the current file contents, and runs the default
+    pipeline. Exits non-zero when any blocking gate fails, or under
+    ``--strict`` when any gate emits any finding.
+    """
+    from docagent.artifacts.registry import DocPatch, GenerationContext
     from docagent.verify.pipeline import default_pipeline
 
     console.print(f"[bold]verify[/bold] {repo} (strict={strict})")
+    store = open_store(repo)
+    registry = _registry()
     pipeline = default_pipeline()
     console.print(f"gates: {[g.name for g in pipeline.gates]}")
-    console.print("[yellow]note:[/yellow] gate execution against on-disk artifacts is not yet wired.")
+
+    registered = {a.id: a for a in registry.all()}
+    on_disk = {row[0]: row[1] for row in store.list_artifacts()}  # id -> rel path
+
+    # Discovery fallback: a fresh CI checkout has ``.docagent/`` gitignored,
+    # so the artifacts table is empty. Walk the registry and include any
+    # artifact whose declared ``target`` exists as a file on disk. This is
+    # what makes the GitHub Action work without a prior ``docagent init``.
+    for aid, artifact in registered.items():
+        if aid in on_disk:
+            continue
+        target = getattr(artifact, "target", None)
+        if not isinstance(target, Path):
+            continue
+        abs_target = repo / target
+        if abs_target.is_file():
+            on_disk[aid] = target.as_posix()
+
+    target_ids = sorted(set(registered) & set(on_disk))
+    if only:
+        target_ids = [aid for aid in target_ids if aid in only]
+        missing = [aid for aid in only if aid not in on_disk]
+        for aid in missing:
+            console.print(f"[yellow]{aid}[/yellow] not generated yet — run `docagent init`.")
+
+    if not target_ids:
+        console.print("[dim]no artifacts on disk to verify[/dim]")
+        store.close()
+        return
+
+    ctx = GenerationContext(repo_root=repo, store=store, backend=None)  # type: ignore[arg-type]
+    any_failure = False
+    any_finding = False
+
+    for aid in target_ids:
+        rel = on_disk[aid]
+        target = repo / rel
+        if not target.is_file():
+            console.print(f"[red]FAIL[/red] {aid}  missing on disk: {rel}")
+            any_failure = True
+            continue
+        try:
+            content = target.read_bytes()
+        except OSError as exc:
+            console.print(f"[red]FAIL[/red] {aid}  read error: {exc}")
+            any_failure = True
+            continue
+
+        artifact = registered[aid]
+        patch = DocPatch(
+            artifact_id=aid,
+            target_path=target,
+            new_content=content,
+            in_place=False,
+            prompt_version=getattr(artifact, "prompt_version", "0"),
+        )
+        result = pipeline.run(patch, ctx)
+        if not result.ok:
+            any_failure = True
+        if result.findings:
+            any_finding = True
+
+        status = "ok" if result.ok else "FAIL"
+        color = "green" if result.ok else "red"
+        console.print(f"[{color}]{status}[/{color}] {aid}  {rel}")
+        for f in result.findings:
+            console.print(f"  • {f}")
+
+    store.close()
+
+    if any_failure or (strict and any_finding):
+        raise typer.Exit(code=1)
 
 
 if __name__ == "__main__":

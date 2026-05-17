@@ -7,10 +7,14 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+from docagent._logging import get_logger
 from docagent.artifacts.registry import DocArtifact, DocPatch, GenerationContext, Registry
 from docagent.backends.base import LLMBackend
+from docagent.core.paths import to_repo_rel_posix
 from docagent.index.mentions import index_artifact
 from docagent.writer import WriteResult, apply_patch
+
+_log = get_logger("orchestrator")
 
 
 def _patch_digest(patch: DocPatch) -> str:
@@ -53,11 +57,14 @@ class Orchestrator:
         subset = list(self.only) if self.only else None
         order: list[DocArtifact] = self.registry.topo_order(subset)
         runs: list[ArtifactRun] = []
+        _log.debug("orchestrator.run: %d artifact(s), dry_run=%s", len(order), self.dry_run)
         for artifact in order:
             run = ArtifactRun(artifact_id=artifact.id)
+            _log.debug("artifact start: %s", artifact.id)
             try:
                 tasks = artifact.plan(ctx)
             except Exception as exc:  # pragma: no cover - defensive
+                _log.exception("plan failed for %s", artifact.id)
                 run.error = f"plan failed: {exc!r}"
                 runs.append(run)
                 continue
@@ -66,19 +73,26 @@ class Orchestrator:
                 try:
                     patch = artifact.generate(task, ctx)
                 except NotImplementedError as exc:
+                    _log.info("generate not wired: %s (%s)", artifact.id, exc)
                     run.error = f"generate not wired: {exc}"
                     continue
                 except Exception as exc:
+                    _log.exception("generate failed for %s", artifact.id)
                     run.error = f"generate failed: {exc!r}"
                     continue
 
                 result = artifact.verify(patch, ctx)
                 if not result.ok:
                     run.verify_ok = False
+                    _log.info("verify failed for %s: %s", artifact.id, result.findings)
                 run.findings.extend(result.findings)
                 if result.ok:
                     write_result = apply_patch(patch, self.repo_root, dry_run=self.dry_run)
                     run.writes.append(write_result)
+                    _log.debug(
+                        "wrote %s → %s (written=%s, dry_run=%s)",
+                        artifact.id, write_result.target, write_result.written, self.dry_run,
+                    )
                     if not self.dry_run and write_result.written:
                         self._post_write(patch, run)
                 run.patches.append(patch.target_path)
@@ -98,12 +112,7 @@ class Orchestrator:
                 known = self.store.known_symbol_names()  # type: ignore[attr-defined]
             except AttributeError:
                 known = set()
-            target_rel = patch.target_path
-            if target_rel.is_absolute():
-                try:
-                    target_rel = target_rel.relative_to(self.repo_root)
-                except ValueError:
-                    pass
+            target_rel = to_repo_rel_posix(self.repo_root, patch.target_path)
             run.mention_count = index_artifact(
                 self.store,
                 artifact_id=patch.artifact_id,
@@ -116,9 +125,10 @@ class Orchestrator:
             now = datetime.now(timezone.utc).isoformat()
             self.store.upsert_artifact(  # type: ignore[attr-defined]
                 artifact_id=patch.artifact_id,
-                path=str(target_rel),
+                path=target_rel,
                 digest=digest,
                 last_run=now,
             )
         except Exception as exc:  # pragma: no cover - defensive
+            _log.exception("post-write hook failed for %s", patch.artifact_id)
             run.findings.append(f"post-write hook failed: {exc!r}")

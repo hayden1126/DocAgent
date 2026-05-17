@@ -1,0 +1,118 @@
+name: 'DocAgent Verify'
+description: >-
+  Verifies repository documentation against the source it cites. Fails CI when
+  a `<!-- ground: file:lines -->` citation points at a missing file, a wrong
+  line range, a broken link, or a leaked secret.
+author: 'hayden1126'
+branding:
+  icon: 'check-circle'
+  color: 'green'
+
+inputs:
+  repo-path:
+    description: 'Path to the repo to verify. Defaults to the runner workspace.'
+    required: false
+    default: '.'
+  strict:
+    description: 'Fail on any finding, including non-blocking warnings (e.g. markdownlint nits, judge `skipped`).'
+    required: false
+    default: 'false'
+  only:
+    description: 'Comma-separated artifact ids to verify (empty = all discovered).'
+    required: false
+    default: ''
+  python-version:
+    description: 'Python version to set up on the runner.'
+    required: false
+    default: '3.11'
+  comment-on-failure:
+    description: 'When triggered by a PR event, post a comment with the findings on failure.'
+    required: false
+    default: 'true'
+
+outputs:
+  passed:
+    description: '"true" when every verified artifact passed; "false" otherwise.'
+    value: ${{ steps.verify.outputs.passed }}
+  findings:
+    description: 'Raw verifier output (one finding per line, prefixed with the gate name).'
+    value: ${{ steps.verify.outputs.findings }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install DocAgent
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        python -m pip install --upgrade pip
+        python -m pip install "$ACTION_PATH"
+
+    - name: Run docagent verify
+      id: verify
+      shell: bash
+      env:
+        INPUT_STRICT: ${{ inputs.strict }}
+        INPUT_ONLY: ${{ inputs.only }}
+        INPUT_REPO_PATH: ${{ inputs.repo-path }}
+      run: |
+        set +e
+        args=( "-C" "$INPUT_REPO_PATH" )
+        if [ "$INPUT_STRICT" = "true" ]; then
+          args+=( "--strict" )
+        fi
+        if [ -n "$INPUT_ONLY" ]; then
+          IFS=',' read -ra ids <<< "$INPUT_ONLY"
+          for id in "${ids[@]}"; do
+            id_trimmed=$(echo "$id" | xargs)
+            [ -n "$id_trimmed" ] && args+=( "--only" "$id_trimmed" )
+          done
+        fi
+        out=$(docagent verify "${args[@]}" 2>&1)
+        code=$?
+        echo "$out"
+        if [ $code -eq 0 ]; then
+          echo "passed=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "passed=false" >> "$GITHUB_OUTPUT"
+        fi
+        {
+          echo 'findings<<DOCAGENT_EOF'
+          echo "$out"
+          echo 'DOCAGENT_EOF'
+        } >> "$GITHUB_OUTPUT"
+        exit $code
+
+    - name: Comment on PR
+      if: failure() && inputs.comment-on-failure == 'true' && github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      env:
+        DOCAGENT_FINDINGS: ${{ steps.verify.outputs.findings }}
+      with:
+        script: |
+          const findings = process.env.DOCAGENT_FINDINGS || '(no output captured)';
+          const body = [
+            '### DocAgent verify failed',
+            '',
+            'A documentation gate flagged an issue. The full verifier output:',
+            '',
+            '```',
+            findings,
+            '```',
+            '',
+            'Fix the cited file/line ranges, broken links, or other findings — or run',
+            '`docagent update` locally to refresh affected artifacts and push the result.',
+          ].join('\n');
+          await github.rest.issues.createComment({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+            body,
+          });

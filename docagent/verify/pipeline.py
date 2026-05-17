@@ -30,16 +30,23 @@ class VerifierPipeline:
         return self
 
     def run(self, patch: DocPatch, ctx: GenerationContext) -> VerifyResult:
+        """Run gates in order, returning aggregate ok + findings.
+
+        ``ok`` is False only when a *blocking* gate fails. Non-blocking gate
+        failures contribute findings but never flip the result — that's what
+        ``blocking=False`` means. The CLI's ``--strict`` flag is what
+        tightens "fail on any finding" back on, surfaced as a separate
+        decision at the call site (see ``docagent.cli.verify``).
+        """
         findings: list[str] = []
         ok = True
         for gate in self.gates:
             passed, msgs = gate.run(patch, ctx)
             for m in msgs:
                 findings.append(f"[{gate.name}] {m}")
-            if not passed:
+            if not passed and gate.blocking:
                 ok = False
-                if gate.blocking:
-                    break
+                break
         return VerifyResult(ok=ok, findings=tuple(findings))
 
 
