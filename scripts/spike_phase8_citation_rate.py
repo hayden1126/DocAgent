@@ -87,11 +87,12 @@ def main() -> int:
         return 3
     duration = time.monotonic() - started
 
-    citations = list(iter_citations(response.content))
+    citations = list(iter_citations(response.content.encode("utf-8")))
     resolved = 0
     unresolved: list[dict[str, object]] = []
     for cite in citations:
-        cited_path = fixture / cite.path
+        cite_path_str = cite.path.decode("utf-8") if isinstance(cite.path, bytes) else cite.path
+        cited_path = fixture / cite_path_str
         ok = False
         if cited_path.is_file():
             line_count = sum(1 for _ in cited_path.open(encoding="utf-8", errors="replace"))
@@ -101,7 +102,7 @@ def main() -> int:
             resolved += 1
         else:
             unresolved.append(
-                {"path": cite.path, "line_start": cite.line_start, "line_end": cite.line_end}
+                {"path": cite_path_str, "line_start": cite.line_start, "line_end": cite.line_end}
             )
 
     rate = (resolved / len(citations)) if citations else 0.0
