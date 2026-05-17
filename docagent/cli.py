@@ -2,20 +2,24 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import os
+import time
+from datetime import UTC, datetime
 from pathlib import Path
 
 import typer
 from rich.console import Console
 
 from docagent import __version__
-from docagent._logging import setup_logging
+from docagent._logging import get_logger, setup_logging
 from docagent.artifacts.builtins import register_v1_builtins
 from docagent.artifacts.registry import Registry
 from docagent.core import diff, state
+from docagent.core.budget import BudgetTracker
 from docagent.core.paths import to_repo_rel_posix
 from docagent.core.scanner import Scanner
 from docagent.index.store import open_store
+from docagent.pricing import format_usd
 
 app = typer.Typer(
     name="docagent",
@@ -36,6 +40,76 @@ def _version_callback(value: bool) -> None:
     if value:
         console.print(f"docagent {__version__}")
         raise typer.Exit()
+
+
+def _validate_max_cost(value: float) -> float:
+    """Typer Option callback. Rejects negative flag values via BadParameter
+    so typer produces a clean exit code 2 (parameter validation error).
+    The env-var fallback is more lenient — see `_resolve_max_cost`."""
+    if value < 0:
+        raise typer.BadParameter("--max-cost must be >= 0; 0 disables the cap")
+    return value
+
+
+def _resolve_max_cost(flag_value: float) -> float:
+    """Precedence: explicit flag > DOCAGENT_MAX_COST env var > 0 (off).
+
+    Negative flag values are rejected upstream by `_validate_max_cost`.
+    Env-var path is intentionally lenient: malformed or negative values
+    are logged at DEBUG and treated as no cap (env vars often leak from
+    unrelated parents).
+    """
+    if flag_value > 0:
+        return flag_value
+    raw = os.environ.get("DOCAGENT_MAX_COST")
+    if raw is None or raw == "":
+        return 0.0
+    log = get_logger("cli")
+    try:
+        parsed = float(raw)
+    except ValueError:
+        log.debug("DOCAGENT_MAX_COST=%r is not a valid float; ignoring", raw)
+        return 0.0
+    if parsed < 0:
+        log.debug("DOCAGENT_MAX_COST=%r is negative; ignoring", raw)
+        return 0.0
+    return parsed
+
+
+def _render_summary(
+    out: Console,
+    tracker: BudgetTracker,
+    dry_run: bool,
+    effective_cap: float,
+    runs_count: int,
+    expected_total: int,
+    wall: float,
+) -> None:
+    """Render the final run summary footer.
+
+    Pure presentation: writes only to the supplied `out` Console. Both
+    `init` and `update` call this function — single source of truth so
+    the footer cannot drift between commands.
+    """
+    if dry_run:
+        out.print(f"\ntokens: n/a (dry-run)  wall={wall:.1f}s")
+        return
+    summary = tracker.summary(
+        artifacts_completed=runs_count,
+        artifacts_total=expected_total,
+    )
+    if tracker.aborted:
+        out.print(
+            f"\n[yellow]aborted at {format_usd(summary.cost_usd)} of "
+            f"{format_usd(effective_cap)} cap; "
+            f"{summary.artifacts_completed} of {summary.artifacts_total} "
+            f"artifacts shipped[/yellow]"
+        )
+    out.print(
+        f"in={summary.input_tokens} out={summary.output_tokens} "
+        f"tool_calls={summary.tool_calls} cost={format_usd(summary.cost_usd)} "
+        f"wall={wall:.1f}s"
+    )
 
 
 @app.callback()
@@ -96,14 +170,24 @@ def init(
         "--max-modules",
         help="Cap on per-module artifacts (e.g. api_reference). 0 = unlimited.",
     ),
+    max_cost: float = typer.Option(
+        0.0,
+        "--max-cost",
+        callback=_validate_max_cost,
+        help=(
+            "Soft cost cap in USD; 0 (default) disables. Also reads "
+            "DOCAGENT_MAX_COST. Aborts BETWEEN artifacts; exit code 3."
+        ),
+    ),
 ) -> None:
     """Full pass: scan repo, build index, generate all artifacts."""
     from docagent.backends.agent_sdk import AgentSDKBackend, BackendUnavailableError
     from docagent.core.orchestrator import Orchestrator
 
+    start_time = time.monotonic()
     console.print(f"[bold]init[/bold] {repo}")
     store = open_store(repo)
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
 
     if not skip_index:
         n_files, n_symbols = _index_repo(repo, store, now)
@@ -121,6 +205,7 @@ def init(
             console.print(f"[red]{exc}[/red]")
             store.close()
             raise typer.Exit(code=2) from exc
+    effective_cap = _resolve_max_cost(max_cost)
     orchestrator = Orchestrator(
         repo_root=repo,
         registry=registry,
@@ -129,8 +214,11 @@ def init(
         only=tuple(only),
         dry_run=dry_run,
         config={"max_modules": max_modules},
+        max_cost=effective_cap,
+        console=console,
     )
     runs = orchestrator.run()
+    tracker = orchestrator.tracker
     for r in runs:
         status = "ok" if r.verify_ok and r.error is None else "FAIL"
         color = "green" if status == "ok" else "red"
@@ -149,11 +237,20 @@ def init(
                 f"  digest={r.digest[:12]}… mentions={r.mention_count}"
             )
 
+    wall = time.monotonic() - start_time
+    expected_total = len(registry.topo_order(list(only) if only else None))
+    _render_summary(
+        console, tracker, dry_run, effective_cap, len(runs), expected_total, wall
+    )
+
     rs = state.RunState.load(repo)
     rs.doc_version = diff.current_head(repo)
     rs.last_run = now
     rs.save(repo)
     store.close()
+
+    if tracker.aborted:
+        raise typer.Exit(code=3)
 
 
 @app.command()
@@ -163,6 +260,15 @@ def update(
     only: list[str] = typer.Option(
         [], "--only", help="Restrict to one or more artifact ids (repeatable)."
     ),
+    max_cost: float = typer.Option(
+        0.0,
+        "--max-cost",
+        callback=_validate_max_cost,
+        help=(
+            "Soft cost cap in USD; 0 (default) disables. Also reads "
+            "DOCAGENT_MAX_COST. Aborts BETWEEN artifacts; exit code 3."
+        ),
+    ),
 ) -> None:
     """Incremental refresh: regenerate artifacts affected by changes since the last run."""
     from docagent.backends.agent_sdk import AgentSDKBackend, BackendUnavailableError
@@ -170,6 +276,7 @@ def update(
     from docagent.core.orchestrator import Orchestrator
     from docagent.core.scanner import Scanner
 
+    start_time = time.monotonic()
     console.print(f"[bold]update[/bold] {repo}")
     rs = state.RunState.load(repo)
     if rs.doc_version is None:
@@ -198,7 +305,7 @@ def update(
     scanner = Scanner(repo)
     by_ext = scanner.by_ext
     new_symbols_by_file: dict[str, set[str]] = {}
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
 
     for p in changed:
         if not p.exists() or not p.is_file():
@@ -270,6 +377,7 @@ def update(
             console.print(f"[red]{exc}[/red]")
             store.close()
             raise typer.Exit(code=2) from exc
+    effective_cap = _resolve_max_cost(max_cost)
     orchestrator = Orchestrator(
         repo_root=repo,
         registry=registry,
@@ -278,8 +386,11 @@ def update(
         changed_files=tuple(changed),
         only=tuple(affected),
         dry_run=dry_run,
+        max_cost=effective_cap,
+        console=console,
     )
     runs = orchestrator.run()
+    tracker = orchestrator.tracker
     for r in runs:
         status = "ok" if r.verify_ok and r.error is None else "FAIL"
         color = "green" if status == "ok" else "red"
@@ -296,11 +407,19 @@ def update(
         if r.digest:
             console.print(f"  digest={r.digest[:12]}… mentions={r.mention_count}")
 
+    wall = time.monotonic() - start_time
+    _render_summary(
+        console, tracker, dry_run, effective_cap, len(runs), len(affected), wall
+    )
+
     if not dry_run:
         rs.doc_version = diff.current_head(repo)
         rs.last_run = now
         rs.save(repo)
     store.close()
+
+    if tracker.aborted:
+        raise typer.Exit(code=3)
 
 
 @app.command()
@@ -363,7 +482,7 @@ def verify(
         store.close()
         return
 
-    ctx = GenerationContext(repo_root=repo, store=store, backend=None)  # type: ignore[arg-type]
+    ctx = GenerationContext(repo_root=repo, store=store, backend=None)
     any_failure = False
     any_finding = False
 
