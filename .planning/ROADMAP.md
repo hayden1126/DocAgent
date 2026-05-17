@@ -22,7 +22,7 @@ Active work shifts to budget telemetry next, then `how_to_guides`, then TS
 - [x] **Phase 4: `api_reference` artifact (Python)** — first multi-file artifact, schema v2
 - [x] **Phase 5: Budget telemetry** — token counts + `--max-cost` (Anthropic-only)
 - [x] **Phase 6: `how_to_guides` artifact** — Diátaxis how-to quadrant
-- [ ] **Phase 7: TypeScript `api_reference`** — broaden the multi-file artifact to TS repos
+- [x] **Phase 7: TypeScript `api_reference`** — broaden the multi-file artifact to TS repos
 - [ ] **Phase 8: Multi-provider backends** — Ollama / Gemini / litellm (reopens "one canonical backend")
 
 ## Phase Details
@@ -103,7 +103,7 @@ Active work shifts to budget telemetry next, then `how_to_guides`, then TS
 - [x] 06-06-PLAN.md — Wave 4: `RecordedBackend.responses` queue extension + golden snapshot test on tinylib fixture (2 topics) (`537e455`)
 **Status**: Shipped (6 commits, +55 tests). Tests: 304.
 
-### Phase 7: TypeScript `api_reference`
+### Phase 7: TypeScript `api_reference` (SHIPPED 2026-05-17)
 
 **Goal**: Bring the multi-file artifact to TS repos. Module discovery via `tsconfig.include` + `package.json` exports.
 **Depends on**: Phase 4
@@ -112,6 +112,14 @@ Active work shifts to budget telemetry next, then `how_to_guides`, then TS
   1. `docagent init` on a TS repo writes `docs/reference/<dotted>.md` per public module.
   2. JSDoc-aware where useful, but JSDoc *splicing* remains out of scope.
   3. Same idempotence + `--max-modules` semantics as the Python path.
+**Plans**: 6 plans across 5 waves (all shipped 2026-05-17)
+- [x] 07-01-PLAN.md — Wave 1: TS adapter JSDoc → `Symbol.existing_doc` wiring + 24 unit tests (`a2ad152`)
+- [x] 07-02-PLAN.md — Wave 2: TS adapter `extract_exports()` method + `typescript_exports.scm` query + 11 unit tests (`99c2e3b`)
+- [x] 07-03-PLAN.md — Wave 1: `docagent/artifacts/_jsonc.py` — zero-dep JSONC stripper + 12 unit tests (`424430e`)
+- [x] 07-04-PLAN.md — Wave 3: `docagent/artifacts/_ts_module_discovery.py` — three-tier cascade + dotted-name + barrel-drop + path-traversal guard + 15 unit tests (`145cbce`)
+- [x] 07-05-PLAN.md — Wave 4: language-dispatch `plan()` + merged `--max-modules` cap + `PROMPT_VERSION` 1→2 bump + renderer Exported-as column + JSDoc-brief surfacing + 14 unit tests (`48828d9`)
+- [x] 07-06-PLAN.md — Wave 5: enriched `tinylib_ts/` fixture + 5 golden snapshot tests (`1781c39`)
+**Status**: Shipped (6 commits, +81 tests). Tests: 385.
 
 ### Phase 8: Multi-provider backends
 

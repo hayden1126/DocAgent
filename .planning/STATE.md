@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (scaffolded 2026-05-16)
 
 **Core value:** The verifier is the moat — every claim grounds to source, and CI breaks if the source moves.
-**Current focus:** Phase 7 (TS `api_reference`) — Phase 6 shipped 2026-05-17.
+**Current focus:** Phase 8 (multi-provider backends) — Phase 7 shipped 2026-05-17.
 
 ## Current Position
 
-Phase: 7 of 8 (TS `api_reference`)
+Phase: 8 of 8 (multi-provider backends — Ollama / Gemini / litellm)
 Plan: not yet planned
-Status: Ready to plan (`/gsd:plan-phase 7`)
-Last activity: 2026-05-17 — Phase 6 (`how_to_guides`) shipped. P0 orchestrator token-attribution bug fixed (Plan 06-01), then full artifact: `_topic_discovery` + `_how_to_render` + prompt module + `HowToGuidesArtifact` end-to-end with sentinel-gated orphan flag + `--max-howtos` CLI flag + RecordedBackend queue + golden snapshot coverage. 6 commits, +55 tests (249 → 304). All ruff/mypy strict-clean on new code.
+Status: Phase 7 SHIPPED 2026-05-17. Ready to plan Phase 8 (`/gsd:plan-phase 8`)
+Last activity: 2026-05-17 — Phase 7 (TS `api_reference`) shipped end-to-end across 5 waves, 6 commits, +81 tests (304 → 385). TS adapter gaps A+B closed (JSDoc → `Symbol.existing_doc` + `extract_exports()` method via new `typescript_exports.scm`). Zero-dep JSONC stripper (`_jsonc.py`) avoided the slop-squatted `pyjsonc` PyPI hallucination. New `_ts_module_discovery.py` implements the locked three-tier cascade (`package.json#exports` → `tsconfig.json#include` → glob) with barrel-file drop, private-symbol filter, and path-traversal guard. `api_reference.plan()` now dispatches by language and applies the `--max-modules` cap to the merged+sorted list (RESEARCH.md Pitfall 5 closed). `PROMPT_VERSION` bumped 1 → 2 with the locked in-source greppable comment; one-time Python fingerprint regeneration accepted (no committed Python `api_reference` golden snapshots existed to drift). Renderer gained `Exported as` column for aliased re-exports + JSDoc-brief surfacing in the Signature column. Enriched `tinylib_ts/` fixture exercises the full cascade including barrel-drop and private-filter; 5 new golden snapshot tests pin the end-to-end output.
 
-Progress: [████████░░] ~75% (6 of 8 phases shipped)
+Progress: [█████████░] ~88% (7 of 8 phases shipped)
 
 ## Performance Metrics
 
 **Velocity (this session):**
-- Total commits: 22
-- Tests added: 70 → 304 (+234)
-- Phases shipped: Phase 2, Phase 3, Phase 4, Phase 5, Phase 6
+- Total commits: 28
+- Tests added: 70 → 385 (+315)
+- Phases shipped: Phase 2, Phase 3, Phase 4, Phase 5, Phase 6, Phase 7
 
 **By Phase:**
 
@@ -32,9 +32,9 @@ Progress: [████████░░] ~75% (6 of 8 phases shipped)
 | 3: TypeScript adapter | 4 (`fe041dd`–`8606190`) | 116 → 147 | Shipped |
 | 4: `api_reference` | 4 (`bd2144a`–`f99d882`) | 147 → 200 | Shipped |
 | 5: Budget telemetry | 5 (`c78c260`–`c70dca7`) | 200 → 249 | Shipped 2026-05-17 |
-| 6: `how_to_guides` | 6 (`3dbeab7`–HEAD) | 249 → 304 | Shipped 2026-05-17 |
-| 7: TS api_reference | — | — | Planned (next) |
-| 8: Multi-provider backends | — | — | Planned |
+| 6: `how_to_guides` | 6 (`3dbeab7`–`537e455`) | 249 → 304 | Shipped 2026-05-17 |
+| 7: TS api_reference | 6 (`424430e`–`1781c39`) | 304 → 385 | Shipped 2026-05-17 |
+| 8: Multi-provider backends | — | — | Planned (next) |
 
 ## Accumulated Context
 
@@ -51,6 +51,7 @@ Progress: [████████░░] ~75% (6 of 8 phases shipped)
 - Pricing fallback: unknown model → Opus 4.7 rates + ONE WARN per distinct model name (deduplicated via module-private `_warned_models: set[str]`).
 - CLI summary: shared `_render_summary` helper for `init` + `update` parity; `--max-cost` negative validation via typer `callback=` so exit code 2 is clean; env-var path is intentionally lenient (logs DEBUG, falls back to 0).
 - Phase 6 (`how_to_guides`): topic-discovery LLM call lives in `plan()`, requiring the P0 orchestrator drain fix (Plan 06-01) — last_responses drained between `plan()` and the per-task loop. Per-page fingerprint = `sha256(prompt_version | model | slug | sorted(path@source_hash))`. Orphan flagging fires exactly once per run on the sentinel `_slugs_written == len(_slugs_to_write)` (== not >=); zero-task cache-hit runs fall back to flagging from the end of `plan()`. Single `PROMPT_VERSION` covers both discovery + per-page prompts (intentional coupling — any prompt change invalidates all how-to fingerprints). `orchestrator._last_ctx_config` exposes the per-run ctx so the CLI can read artifact-emitted entries (orphans/warnings) that live on the per-run copy, not the orchestrator's input config.
+- Phase 7 (TS `api_reference`): one artifact id `api_reference` for both languages — the dispatch happens inside `plan()`, NOT in registry/DAG (Diátaxis "reference" is language-agnostic). Discovery is a three-tier cascade with first-non-empty-signal short-circuit (NOT union): `package.json#exports` → `tsconfig.json#include` → glob. Wildcard-only `exports` maps downgrade to "absent" with one WARN. `--max-modules` caps the MERGED Python+TS list, deterministic-sorted by dotted name (RESEARCH.md Pitfall 5 closed). JSDoc capture is a tree-sitter `(comment)` capture filtered to `/**` blocks in Python and paired with the nearest immediately-following def whose intervening lines are all blank. `extract_exports()` lives on a separate `.scm` query file (`typescript_exports.scm`) so the existing `extract_symbols` contract ("definitions only") is unchanged. JSONC stripper switched from the three-regex approach in the plan to a string-aware single-pass scanner because the regex form ate `/**/` inside glob strings like `"src/**/*"` (Rule 1 deviation — fix documented in 07-03 summary). PROMPT_VERSION 1→2 bump invalidates Phase-4 Python fingerprints once; this repo has no Python `api_reference` golden snapshots so the bump doesn't drift any committed test artifact. Aliased re-export row shape locked at RESEARCH.md Q1: `name=Bar, kind=re_export, exported-as cell = "Bar (from other.Foo)"`.
 
 ### Mid-session bugs caught & fixed (alpha hardening era)
 
@@ -77,5 +78,5 @@ Lead public announcement with `docagent verify` as the headline, not `init`. "Do
 
 - Branch: `main`
 - Remote: https://github.com/hayden1126/DocAgent (public, MIT)
-- Latest commit: `537e455` — feat(06-06): RecordedBackend queue + how_to_guides golden snapshot
+- Latest commit: `1781c39` — feat(07-06): TS api_reference golden snapshots + fixture enrichment
 - Repo memory lives at `~/.claude/projects/-home-hayden-DocAgent/memory/` (overview, alpha cut, post-alpha roadmap, architecture, feedback patterns, GitHub references). `.planning/` is a synchronized snapshot derived from those files on 2026-05-16.
