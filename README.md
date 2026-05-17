@@ -8,7 +8,7 @@ Most AI documentation tools generate plausible prose and stop there. DocAgent ma
 
 The gate order is cheap-first: structural lint (non-blocking) → links → citations → docs-site dry-run (non-blocking) → secrets → LLM judge (non-blocking, tiebreaker only). Truth-checking gates block writes; stylistic gates do not. <!-- ground: docagent/verify/pipeline.py:46-64 -->
 
-Output is dual-track. Human files (`README.md`) and agent files (`AGENTS.md` per the Linux Foundation spec, `CLAUDE.md` per Anthropic, `llms.txt` per llmstxt.org) share an artifact DAG so dependents (e.g. AGENTS.md citing README) regenerate in the right order. <!-- ground: docagent/artifacts/builtins.py:70-101 -->
+Output is dual-track. Human files (`README.md`) and agent files (`AGENTS.md` per the Linux Foundation spec, `CLAUDE.md` per Anthropic, `llms.txt` per llmstxt.org) share an artifact DAG so dependents (e.g. AGENTS.md citing README) regenerate in the right order. <!-- ground: docagent/artifacts/builtins.py:71-92 -->
 
 ## Install
 
@@ -86,7 +86,7 @@ Paths are repo-relative POSIX (`/`-separated). The line range is inclusive; a si
 - `docagent/verify/pipeline.py` — gate ordering and blocking semantics. <!-- ground: docagent/verify/pipeline.py:46-64 -->
 - `docagent/citations.py` — single source of truth for the citation grammar. <!-- ground: docagent/citations.py:11-21 -->
 - `docagent/backends/agent_sdk.py` — Claude Agent SDK backend; restricted to `Read/Glob/Grep`. <!-- ground: docagent/backends/agent_sdk.py:34-39 -->
-- `docagent/artifacts/builtins.py` — v1 artifact registry. <!-- ground: docagent/artifacts/builtins.py:70-101 -->
+- `docagent/artifacts/builtins.py` — v1 artifact registry. <!-- ground: docagent/artifacts/builtins.py:71-92 -->
 - `tests/integration/test_verify_flow.py` and `test_update_flow.py` — end-to-end coverage of the two CI-visible flows.
 
 ## Languages
@@ -95,9 +95,15 @@ Python and TypeScript / JavaScript are first-class: a dedicated adapter extracts
 
 Rust, Go, Java, and C++ are covered by a tree-sitter-only fallback adapter — symbol extraction works but cross-references are lexical, not semantic. <!-- ground: docagent/adapters/fallback.py:25-50 -->
 
+## `api_reference`
+
+For each public Python module the scanner indexed, `api_reference` writes one curated landing page at `docs/reference/<dotted.name>.md`. <!-- ground: docagent/artifacts/api_reference.py:204-209 --> Each page combines a deterministic public-surface table (read directly from the symbol index — no LLM) with an LLM-written opener paragraph and 1-3 grounded worked examples, plus a see-also section linking to sibling and parent modules. <!-- ground: docagent/artifacts/_api_reference_render.py:107-138 --> Per-module fingerprinting via the new `artifact_unit_fingerprints` table makes re-runs idempotent — unchanged source skips the LLM call entirely. <!-- ground: docagent/artifacts/api_reference.py:60-76 -->
+
+Use `--max-modules N` on `init` to cap the per-run cost (default 25, set to `0` for unlimited). <!-- ground: docagent/cli.py:93-97 --> The artifact deliberately does NOT generate per-symbol pages — point [`mkdocstrings`](https://mkdocstrings.github.io/) or [`pdoc`](https://pdoc.dev/) at the same source for that.
+
 ## Status
 
-v1 alpha. Four artifacts ship end-to-end (`readme`, `agents_md`, `claude_md`, `llms_txt`); `api_reference`, `how_to_guides`, and `python_docstrings` are stubs deferred past alpha. <!-- ground: docagent/artifacts/builtins.py:80-95 --> The verifier is fully wired against on-disk artifacts; the `judge` gate is non-blocking and reports `skipped: judge not yet implemented` until its single-turn LLM call lands. <!-- ground: docagent/verify/judge.py:1-9 -->
+v1 alpha. Five artifacts ship end-to-end (`readme`, `agents_md`, `claude_md`, `llms_txt`, `api_reference`); `how_to_guides` and `python_docstrings` remain stubs (the latter cut from v1 — in-place source mutation is too high-risk for an experimental flag). <!-- ground: docagent/artifacts/builtins.py:71-92 --> The verifier is fully wired against on-disk artifacts; the `judge` gate is non-blocking and reports `skipped: judge not yet implemented` until its single-turn LLM call lands. <!-- ground: docagent/verify/judge.py:1-9 -->
 
 ## License
 

@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from docagent.artifacts.agents_md import AgentsMdArtifact
+from docagent.artifacts.api_reference import ApiReferenceArtifact
 from docagent.artifacts.claude_md import ClaudeMdArtifact
 from docagent.artifacts.llms_txt import LlmsTxtArtifact
 from docagent.artifacts.readme import ReadmeArtifact
@@ -77,14 +78,7 @@ def register_v1_builtins(registry: Registry) -> None:
             target=Path("."),
         )
     )
-    registry.register(
-        _StubArtifact(
-            id="api_reference",
-            audience="both",
-            depends_on=(),
-            target=Path("docs/reference"),
-        )
-    )
+    registry.register(ApiReferenceArtifact())
     registry.register(
         _StubArtifact(
             id="how_to_guides",
@@ -95,7 +89,4 @@ def register_v1_builtins(registry: Registry) -> None:
     )
     registry.register(AgentsMdArtifact())
     registry.register(ClaudeMdArtifact())
-    # v1 alpha: llms_txt depends only on readme. The api_reference dep edge
-    # will be re-added once api_reference is wired (it would currently cause
-    # broken-link warnings since docs/reference/ is not yet generated).
     registry.register(LlmsTxtArtifact())

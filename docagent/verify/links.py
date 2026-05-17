@@ -82,6 +82,20 @@ def check(patch: DocPatch, ctx: GenerationContext) -> tuple[bool, Sequence[str]]
 
     own_anchors = _own_anchors(text)
     repo_root = ctx.repo_root
+    # Markdown relative links resolve against the *containing file*, not the
+    # repo root. Fall back to repo_root when the target_path doesn't yet
+    # exist (e.g. dry-run preview) so README.md at the repo root keeps the
+    # same resolution semantics as before.
+    base_dir = patch.target_path.parent if patch.target_path else repo_root
+    if not base_dir.is_absolute():
+        base_dir = (repo_root / base_dir).resolve()
+
+    # "Future paths" are absolute target paths a multi-file artifact has
+    # planned to write in the same run but hasn't written yet. The artifact
+    # populates ``ctx.config["_future_paths"]`` before calling verify so that
+    # sibling links resolving into the set don't fail the gate mid-run.
+    future_paths_raw = ctx.config.get("_future_paths", ()) if hasattr(ctx, "config") else ()
+    future_paths = {Path(p).resolve() for p in future_paths_raw}
 
     seen_inline: set[str] = set()
     for m in _LINK_RE.finditer(text):
@@ -89,20 +103,26 @@ def check(patch: DocPatch, ctx: GenerationContext) -> tuple[bool, Sequence[str]]
         if url in seen_inline:
             continue
         seen_inline.add(url)
-        if not _validate_url(url, own_anchors, repo_root):
+        if not _validate_url(url, own_anchors, repo_root, base_dir, future_paths):
             findings.append(f"broken link: {url}")
             ok = False
 
     for m in _REF_DEF_RE.finditer(text):
         url = _strip_title(m.group("url"))
-        if not _validate_url(url, own_anchors, repo_root):
+        if not _validate_url(url, own_anchors, repo_root, base_dir, future_paths):
             findings.append(f"broken reference link [{m.group('id')}]: {url}")
             ok = False
 
     return ok, findings
 
 
-def _validate_url(url: str, own_anchors: set[str], repo_root: Path) -> bool:
+def _validate_url(
+    url: str,
+    own_anchors: set[str],
+    repo_root: Path,
+    base_dir: Path,
+    future_paths: set[Path],
+) -> bool:
     if not url:
         return False
     if _is_external(url):
@@ -113,10 +133,12 @@ def _validate_url(url: str, own_anchors: set[str], repo_root: Path) -> bool:
     # does not validate cross-file anchors (those move when the target file
     # is regenerated and would need re-resolution against an artifact graph).
     path_part = url.split("#", 1)[0]
-    candidate = (repo_root / path_part).resolve()
+    candidate = (base_dir / path_part).resolve()
     try:
         # Don't allow escaping the repo root via ``../../..``.
         candidate.relative_to(repo_root.resolve())
     except ValueError:
         return False
+    if candidate in future_paths:
+        return True
     return candidate.exists()

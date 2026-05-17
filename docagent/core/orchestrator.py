@@ -46,6 +46,7 @@ class Orchestrator:
     changed_files: tuple[Path, ...] = ()
     only: tuple[str, ...] = ()
     dry_run: bool = False
+    config: dict[str, object] = field(default_factory=dict)
 
     def run(self) -> list[ArtifactRun]:
         ctx = GenerationContext(
@@ -53,6 +54,7 @@ class Orchestrator:
             store=self.store,
             backend=self.backend,
             changed_files=self.changed_files,
+            config=dict(self.config),
         )
         subset = list(self.only) if self.only else None
         order: list[DocArtifact] = self.registry.topo_order(subset)
@@ -95,6 +97,20 @@ class Orchestrator:
                     )
                     if not self.dry_run and write_result.written:
                         self._post_write(patch, run)
+                        # Per-artifact post_write hook (used by multi-file
+                        # artifacts like api_reference to persist their
+                        # per-unit fingerprint after a successful write).
+                        artifact_post = getattr(artifact, "post_write", None)
+                        if artifact_post is not None:
+                            try:
+                                artifact_post(patch, ctx)
+                            except Exception as exc:  # pragma: no cover - defensive
+                                _log.exception(
+                                    "artifact post_write failed for %s", artifact.id
+                                )
+                                run.findings.append(
+                                    f"artifact post_write failed: {exc!r}"
+                                )
                 run.patches.append(patch.target_path)
             runs.append(run)
         return runs

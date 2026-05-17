@@ -3,7 +3,7 @@
 
 Repository documentation agent for humans and coding agents; Python ≥ 3.11, Typer CLI, Claude Agent SDK backend. <!-- ground: pyproject.toml:8-11 --> <!-- ground: docagent/backends/agent_sdk.py:1-11 -->
 
-No `AGENTS.md` exists at the repo root yet — `agents_md` is itself one of the artifacts this repo generates. <!-- ground: docagent/artifacts/builtins.py:96-96 -->
+No `AGENTS.md` exists at the repo root yet — `agents_md` is itself one of the artifacts this repo generates. <!-- ground: docagent/artifacts/builtins.py:90-90 -->
 
 ## Quick commands
 
@@ -20,7 +20,7 @@ pytest                               # full test suite (unit + golden)
 ## Where to look
 
 - `docagent/cli.py` — Typer app; commands `init`, `update`, `verify`. <!-- ground: docagent/cli.py:18-23 -->
-- `docagent/artifacts/builtins.py` — DAG and registration of v1 artifacts (`readme`, `python_docstrings`, `api_reference`, `how_to_guides`, `agents_md`, `claude_md`, `llms_txt`). <!-- ground: docagent/artifacts/builtins.py:7-14 --> <!-- ground: docagent/artifacts/builtins.py:70-101 -->
+- `docagent/artifacts/builtins.py` — DAG and registration of v1 artifacts (`readme`, `python_docstrings`, `api_reference`, `how_to_guides`, `agents_md`, `claude_md`, `llms_txt`). <!-- ground: docagent/artifacts/builtins.py:7-14 --> <!-- ground: docagent/artifacts/builtins.py:71-92 -->
 - `docagent/core/orchestrator.py` — drives `plan → generate → verify → write`, plus the post-write mention-index hook. <!-- ground: docagent/core/orchestrator.py:46-86 -->
 - `docagent/verify/pipeline.py` — gate order (markdownlint → links → citations → docs_site → secrets → judge). <!-- ground: docagent/verify/pipeline.py:46-57 -->
 - `docagent/backends/agent_sdk.py` — `AgentSDKBackend`; tools restricted to `Read/Glob/Grep`, `permission_mode="bypassPermissions"`. <!-- ground: docagent/backends/agent_sdk.py:21-37 -->
@@ -39,8 +39,8 @@ pytest                               # full test suite (unit + golden)
 
 - `docagent update` requires a previous `docagent init` to have written `doc_version` into run state; otherwise it exits with code 2. Affected-artifact resolution is **not yet wired** — `update` only lists changed files. <!-- ground: docagent/cli.py:146-158 -->
 - `docagent verify` currently prints the gate list and notes that gate execution against on-disk artifacts is not yet wired — do not assume it failed because no findings appeared. <!-- ground: docagent/cli.py:166-172 -->
-- Most v1 artifacts other than `readme`, `agents_md`, `claude_md`, `llms_txt` still emit a placeholder stub (`<!-- docagent: <id> stub. Real generator not yet implemented. -->`). Treat their outputs as scaffolding, not regressions. <!-- ground: docagent/artifacts/builtins.py:46-56 -->
-- `PythonDocstringsArtifact.plan` returns `[]` until the symbol-index query is implemented — wiring it requires reading from `ctx.store`, not from disk. <!-- ground: docagent/artifacts/builtins.py:62-67 -->
+- Most v1 artifacts other than `readme`, `agents_md`, `claude_md`, `llms_txt` still emit a placeholder stub (`<!-- docagent: <id> stub. Real generator not yet implemented. -->`). Treat their outputs as scaffolding, not regressions. <!-- ground: docagent/artifacts/builtins.py:47-57 -->
+- `PythonDocstringsArtifact.plan` returns `[]` until the symbol-index query is implemented — wiring it requires reading from `ctx.store`, not from disk. <!-- ground: docagent/artifacts/builtins.py:63-68 -->
 - The scanner skips `.docagent/`, `.venv/`, `vendor/`, `node_modules/`, `build/`, `dist/`, and friends by default; add a `.docagentignore` to extend. <!-- ground: docagent/ignore.py:9-31 --> <!-- ground: docagent/ignore.py:36-40 -->
 - `.docagent/` is gitignored at the repo root but **un-ignored under `tests/golden/`** — fixture state directories are intentionally committed. <!-- ground: .gitignore:22-23 -->
 - The orchestrator's `_post_write` hook swallows exceptions into `run.findings` rather than raising; a missing mention row degrades incremental mode silently. <!-- ground: docagent/core/orchestrator.py:88-124 -->

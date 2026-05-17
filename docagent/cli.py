@@ -91,6 +91,11 @@ def init(
     skip_index: bool = typer.Option(
         False, "--skip-index", help="Skip the symbol index rebuild (use existing .docagent/index.db)."
     ),
+    max_modules: int = typer.Option(
+        25,
+        "--max-modules",
+        help="Cap on per-module artifacts (e.g. api_reference). 0 = unlimited.",
+    ),
 ) -> None:
     """Full pass: scan repo, build index, generate all artifacts."""
     from docagent.backends.agent_sdk import AgentSDKBackend, BackendUnavailableError
@@ -123,6 +128,7 @@ def init(
         store=store,
         only=tuple(only),
         dry_run=dry_run,
+        config={"max_modules": max_modules},
     )
     runs = orchestrator.run()
     for r in runs:

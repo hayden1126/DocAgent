@@ -1,6 +1,6 @@
 # docagent
 
-> Repository documentation agent for humans and coding agents that produces dual-track output — human-facing files like README and how-to guides alongside agent-facing files like AGENTS.md, CLAUDE.md, and llms.txt — driven by an agentic generation loop with a deterministic-first verifier. <!-- ground: docagent/artifacts/builtins.py:70-101 --> It targets multi-language repositories via tree-sitter adapters and supports incremental, git-diff-driven refreshes. <!-- ground: pyproject.toml:27-33 -->
+> Repository documentation agent for humans and coding agents that produces dual-track output — human-facing files like README and how-to guides alongside agent-facing files like AGENTS.md, CLAUDE.md, and llms.txt — driven by an agentic generation loop with a deterministic-first verifier. <!-- ground: docagent/artifacts/builtins.py:71-92 --> It targets multi-language repositories via tree-sitter adapters and supports incremental, git-diff-driven refreshes. <!-- ground: pyproject.toml:27-33 -->
 
 The package is a Python ≥ 3.11 project that installs a `docagent` console script backed by a Typer CLI; the generation backend wraps the Claude Agent SDK with tools restricted to `Read`, `Glob`, and `Grep`. <!-- ground: pyproject.toml:11-11 --> <!-- ground: pyproject.toml:50-51 --> <!-- ground: docagent/backends/agent_sdk.py:21-37 -->
 
@@ -13,7 +13,7 @@ The package is a Python ≥ 3.11 project that installs a `docagent` console scri
 
 - [docagent/cli.py](docagent/cli.py): Typer app exposing `init`, `update`, and `verify` subcommands. <!-- ground: docagent/cli.py:18-23 -->
 - [docagent/core/orchestrator.py](docagent/core/orchestrator.py): drives `plan → generate → verify → write` across the artifact DAG with a post-write mention-index hook. <!-- ground: docagent/core/orchestrator.py:46-86 -->
-- [docagent/artifacts/builtins.py](docagent/artifacts/builtins.py): registers the v1 artifacts (`readme`, `python_docstrings`, `api_reference`, `how_to_guides`, `agents_md`, `claude_md`, `llms_txt`) and wires their dependency DAG. <!-- ground: docagent/artifacts/builtins.py:7-14 --> <!-- ground: docagent/artifacts/builtins.py:70-101 -->
+- [docagent/artifacts/builtins.py](docagent/artifacts/builtins.py): registers the v1 artifacts (`readme`, `python_docstrings`, `api_reference`, `how_to_guides`, `agents_md`, `claude_md`, `llms_txt`) and wires their dependency DAG. <!-- ground: docagent/artifacts/builtins.py:7-14 --> <!-- ground: docagent/artifacts/builtins.py:71-92 -->
 - [docagent/artifacts/registry.py](docagent/artifacts/registry.py): artifact base class and registry that stamps `PROMPT_VERSION` into emitted patches. <!-- ground: docagent/artifacts/registry.py:25-31 -->
 - [docagent/backends/agent_sdk.py](docagent/backends/agent_sdk.py): `AgentSDKBackend` wrapping the Claude Agent SDK; tools restricted to `Read/Glob/Grep` with `permission_mode="bypassPermissions"`. <!-- ground: docagent/backends/agent_sdk.py:21-37 -->
 - [docagent/verify/pipeline.py](docagent/verify/pipeline.py): deterministic-first verifier composed of named gates (markdownlint → links → citations → docs_site → secrets → judge). <!-- ground: docagent/verify/pipeline.py:46-57 -->
