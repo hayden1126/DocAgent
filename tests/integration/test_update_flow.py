@@ -149,7 +149,7 @@ def test_update_flagging_renames_and_rotates_mentions(
     assert not _query(repo, "SELECT * FROM mentions WHERE identifier='salute'")
 
     digests_v1 = {
-        aid: digest for aid, _, digest in _query(repo, "SELECT id, path, digest FROM artifacts")
+        aid: digest for aid, _, digest in _query(repo, "SELECT artifact_id, path, digest FROM artifacts")
         if aid in REAL_ARTIFACTS
     }
     assert set(digests_v1) == set(REAL_ARTIFACTS)
@@ -180,7 +180,7 @@ def test_update_flagging_renames_and_rotates_mentions(
 
     # All 4 artifact digests rotated.
     digests_v2 = {
-        aid: digest for aid, _, digest in _query(repo, "SELECT id, path, digest FROM artifacts")
+        aid: digest for aid, _, digest in _query(repo, "SELECT artifact_id, path, digest FROM artifacts")
         if aid in REAL_ARTIFACTS
     }
     for aid in REAL_ARTIFACTS:

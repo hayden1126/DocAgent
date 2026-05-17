@@ -62,8 +62,10 @@ def test_sqlite_store_migration(tmp_path: Path):
     # idempotent on reopen
     store.close()
     store2 = open_store(tmp_path)
+    from docagent.index.store import SCHEMA_VERSION
+
     cur = store2.conn.execute("SELECT version FROM schema_version")
-    assert cur.fetchone()[0] == 1
+    assert cur.fetchone()[0] == SCHEMA_VERSION
     store2.close()
 
 

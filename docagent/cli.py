@@ -323,30 +323,36 @@ def verify(
     console.print(f"gates: {[g.name for g in pipeline.gates]}")
 
     registered = {a.id: a for a in registry.all()}
-    on_disk = {row[0]: row[1] for row in store.list_artifacts()}  # id -> rel path
+    # Multi-file artifacts produce N rows per artifact_id; verify each path.
+    entries: list[tuple[str, str]] = [
+        (row[0], row[1]) for row in store.list_artifacts()
+    ]
+    on_disk_ids = {aid for aid, _ in entries}
 
     # Discovery fallback: a fresh CI checkout has ``.docagent/`` gitignored,
     # so the artifacts table is empty. Walk the registry and include any
     # artifact whose declared ``target`` exists as a file on disk. This is
     # what makes the GitHub Action work without a prior ``docagent init``.
     for aid, artifact in registered.items():
-        if aid in on_disk:
+        if aid in on_disk_ids:
             continue
         target = getattr(artifact, "target", None)
         if not isinstance(target, Path):
             continue
         abs_target = repo / target
         if abs_target.is_file():
-            on_disk[aid] = target.as_posix()
+            entries.append((aid, target.as_posix()))
+            on_disk_ids.add(aid)
 
-    target_ids = sorted(set(registered) & set(on_disk))
+    entries = [(aid, path) for aid, path in entries if aid in registered]
     if only:
-        target_ids = [aid for aid in target_ids if aid in only]
-        missing = [aid for aid in only if aid not in on_disk]
+        missing = [aid for aid in only if aid not in on_disk_ids]
         for aid in missing:
             console.print(f"[yellow]{aid}[/yellow] not generated yet — run `docagent init`.")
+        entries = [(aid, path) for aid, path in entries if aid in only]
+    entries.sort()
 
-    if not target_ids:
+    if not entries:
         console.print("[dim]no artifacts on disk to verify[/dim]")
         store.close()
         return
@@ -355,8 +361,7 @@ def verify(
     any_failure = False
     any_finding = False
 
-    for aid in target_ids:
-        rel = on_disk[aid]
+    for aid, rel in entries:
         target = repo / rel
         if not target.is_file():
             console.print(f"[red]FAIL[/red] {aid}  missing on disk: {rel}")

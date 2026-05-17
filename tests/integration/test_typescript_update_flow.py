@@ -131,7 +131,7 @@ def test_ts_update_renames_flag_mentioning_artifacts(
 
     digests_v1 = {
         aid: digest
-        for aid, _, digest in _query(repo, "SELECT id, path, digest FROM artifacts")
+        for aid, _, digest in _query(repo, "SELECT artifact_id, path, digest FROM artifacts")
         if aid in REAL_ARTIFACTS
     }
     assert set(digests_v1) == set(REAL_ARTIFACTS)
@@ -161,7 +161,7 @@ def test_ts_update_renames_flag_mentioning_artifacts(
     # All 4 digests rotated.
     digests_v2 = {
         aid: digest
-        for aid, _, digest in _query(repo, "SELECT id, path, digest FROM artifacts")
+        for aid, _, digest in _query(repo, "SELECT artifact_id, path, digest FROM artifacts")
         if aid in REAL_ARTIFACTS
     }
     for aid in REAL_ARTIFACTS:

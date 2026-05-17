@@ -16,7 +16,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS mentions (
 );
 CREATE INDEX IF NOT EXISTS idx_mentions_ident ON mentions(identifier);
 CREATE INDEX IF NOT EXISTS idx_mentions_artifact ON mentions(artifact_id);
+CREATE INDEX IF NOT EXISTS idx_mentions_artifact_path ON mentions(artifact_id, artifact_path);
 
 CREATE TABLE IF NOT EXISTS file_hashes (
     file        TEXT PRIMARY KEY,
@@ -65,12 +66,28 @@ CREATE TABLE IF NOT EXISTS file_hashes (
     updated_at  TEXT NOT NULL
 );
 
+-- Composite primary key (artifact_id, path) lets a multi-file artifact like
+-- ``api_reference`` register one row per generated page. Single-file artifacts
+-- behave identically — they just have one row.
 CREATE TABLE IF NOT EXISTS artifacts (
-    id        TEXT PRIMARY KEY,
-    path      TEXT NOT NULL,
-    version   INTEGER NOT NULL DEFAULT 1,
-    last_run  TEXT NOT NULL,
-    digest    TEXT NOT NULL
+    artifact_id TEXT NOT NULL,
+    path        TEXT NOT NULL,
+    version     INTEGER NOT NULL DEFAULT 1,
+    last_run    TEXT NOT NULL,
+    digest      TEXT NOT NULL,
+    PRIMARY KEY (artifact_id, path)
+);
+
+-- Per-unit fingerprints (e.g. per-module for ``api_reference``). Lets
+-- multi-unit artifacts skip LLM calls when the inputs that produced a unit
+-- haven't changed. ``unit_key`` is artifact-defined (a dotted module name,
+-- a symbol qualified name, a file path, etc).
+CREATE TABLE IF NOT EXISTS artifact_unit_fingerprints (
+    artifact_id TEXT NOT NULL,
+    unit_key    TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    last_run    TEXT NOT NULL,
+    PRIMARY KEY (artifact_id, unit_key)
 );
 """
 
@@ -144,9 +161,28 @@ class Store:
         )
         return list(cur.fetchall())
 
-    def replace_mentions_for_artifact(self, artifact_id: str, rows: list[tuple]) -> None:
+    def replace_mentions_for_artifact(
+        self,
+        artifact_id: str,
+        rows: list[tuple],
+        path: str | None = None,
+    ) -> None:
+        """Replace mention rows for an artifact.
+
+        When ``path`` is ``None``, replaces *all* rows for ``artifact_id`` —
+        the right behavior for single-file artifacts. When ``path`` is given,
+        replaces only the rows for that specific ``(artifact_id, path)`` pair,
+        which is what multi-file artifacts need so writing page 2 doesn't
+        erase page 1's mentions.
+        """
         with self.transaction() as conn:
-            conn.execute("DELETE FROM mentions WHERE artifact_id = ?", (artifact_id,))
+            if path is None:
+                conn.execute("DELETE FROM mentions WHERE artifact_id = ?", (artifact_id,))
+            else:
+                conn.execute(
+                    "DELETE FROM mentions WHERE artifact_id = ? AND artifact_path = ?",
+                    (artifact_id, path),
+                )
             conn.executemany(
                 "INSERT INTO mentions (identifier, artifact_id, artifact_path) VALUES (?, ?, ?)",
                 rows,
@@ -176,13 +212,18 @@ class Store:
         last_run: str,
         version: int = 1,
     ) -> None:
+        """Upsert a single ``(artifact_id, path)`` row.
+
+        Multi-file artifacts call this once per output path; single-file
+        artifacts call it once. The composite primary key ensures each
+        ``(artifact_id, path)`` pair is uniquely tracked.
+        """
         with self.transaction() as conn:
             conn.execute(
                 """
-                INSERT INTO artifacts (id, path, version, last_run, digest)
+                INSERT INTO artifacts (artifact_id, path, version, last_run, digest)
                 VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET
-                    path=excluded.path,
+                ON CONFLICT(artifact_id, path) DO UPDATE SET
                     version=excluded.version,
                     last_run=excluded.last_run,
                     digest=excluded.digest
@@ -190,16 +231,33 @@ class Store:
                 (artifact_id, path, version, last_run, digest),
             )
 
-    def get_artifact_digest(self, artifact_id: str) -> str | None:
-        cur = self.conn.execute(
-            "SELECT digest FROM artifacts WHERE id = ?", (artifact_id,)
-        )
+    def get_artifact_digest(self, artifact_id: str, path: str | None = None) -> str | None:
+        """Return the digest for a specific ``(artifact_id, path)`` pair.
+
+        When ``path`` is omitted, returns the digest of the first matching
+        row (deterministic via ``ORDER BY path``) — convenience for
+        single-file artifacts.
+        """
+        if path is None:
+            cur = self.conn.execute(
+                "SELECT digest FROM artifacts WHERE artifact_id = ? ORDER BY path LIMIT 1",
+                (artifact_id,),
+            )
+        else:
+            cur = self.conn.execute(
+                "SELECT digest FROM artifacts WHERE artifact_id = ? AND path = ?",
+                (artifact_id, path),
+            )
         row = cur.fetchone()
         return row[0] if row else None
 
     def list_artifacts(self) -> list[tuple[str, str, str]]:
-        """Return rows of ``(id, path, digest)`` for all known artifacts."""
-        cur = self.conn.execute("SELECT id, path, digest FROM artifacts ORDER BY id")
+        """Return rows of ``(artifact_id, path, digest)`` for all known
+        artifacts. Multi-file artifacts produce one row per output path; the
+        result may therefore have multiple rows sharing an ``artifact_id``."""
+        cur = self.conn.execute(
+            "SELECT artifact_id, path, digest FROM artifacts ORDER BY artifact_id, path"
+        )
         return list(cur.fetchall())
 
     def artifact_paths(self) -> set[str]:
@@ -211,6 +269,31 @@ class Store:
         """
         cur = self.conn.execute("SELECT path FROM artifacts")
         return {row[0] for row in cur.fetchall()}
+
+    def get_unit_fingerprint(self, artifact_id: str, unit_key: str) -> str | None:
+        cur = self.conn.execute(
+            "SELECT fingerprint FROM artifact_unit_fingerprints "
+            "WHERE artifact_id = ? AND unit_key = ?",
+            (artifact_id, unit_key),
+        )
+        row = cur.fetchone()
+        return row[0] if row else None
+
+    def set_unit_fingerprint(
+        self, artifact_id: str, unit_key: str, fingerprint: str, last_run: str
+    ) -> None:
+        with self.transaction() as conn:
+            conn.execute(
+                """
+                INSERT INTO artifact_unit_fingerprints
+                    (artifact_id, unit_key, fingerprint, last_run)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(artifact_id, unit_key) DO UPDATE SET
+                    fingerprint=excluded.fingerprint,
+                    last_run=excluded.last_run
+                """,
+                (artifact_id, unit_key, fingerprint, last_run),
+            )
 
     def symbols_for_file(self, file: str) -> list[tuple[str, str]]:
         """Return ``(qualified_name, kind)`` rows recorded for ``file``.

@@ -96,5 +96,9 @@ def index_artifact(
     """
     mentions = extract_mentions(content) & known_identifiers
     rows = [(ident, artifact_id, target_path) for ident in sorted(mentions)]
-    store.replace_mentions_for_artifact(artifact_id, rows)  # type: ignore[attr-defined]
+    # Scope the DELETE to (artifact_id, path) so a multi-file artifact writing
+    # page B doesn't erase the mentions page A just registered.
+    store.replace_mentions_for_artifact(  # type: ignore[attr-defined]
+        artifact_id, rows, path=target_path
+    )
     return len(rows)

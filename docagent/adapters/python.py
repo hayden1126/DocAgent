@@ -32,6 +32,39 @@ PYTHON_DOC_STYLE = DocStyle(
 )
 
 
+class _ByteOffsetTable:
+    """Map libcst's (1-based line, 0-based code-point column) to byte offsets.
+
+    libcst's :class:`PositionProvider` reports columns in code points, not
+    bytes. For ASCII sources that's a non-issue, but a single non-ASCII
+    character in a docstring (or a UTF-8 BOM, or smart quotes) would slide
+    every downstream byte range by some amount. Pre-compute a per-line table
+    once and convert per lookup.
+    """
+
+    __slots__ = ("_line_byte_starts", "_line_texts", "_eof_byte")
+
+    def __init__(self, source: bytes) -> None:
+        text = source.decode("utf-8")
+        line_texts = text.split("\n")
+        starts = [0, 0]  # 1-based; element 0 unused
+        cursor = 0
+        for line in line_texts:
+            cursor += len(line.encode("utf-8")) + 1  # +1 for the newline
+            starts.append(cursor)
+        self._line_byte_starts = starts
+        self._line_texts = line_texts
+        self._eof_byte = len(source)
+
+    def at(self, line: int, col: int) -> int:
+        if line < 1 or line > len(self._line_texts):
+            return self._eof_byte
+        line_start = self._line_byte_starts[line]
+        line_text = self._line_texts[line - 1]
+        clipped_col = max(0, min(col, len(line_text)))
+        return line_start + len(line_text[:clipped_col].encode("utf-8"))
+
+
 class _SymbolCollector(cst.CSTVisitor):
     METADATA_DEPENDENCIES = (PositionProvider,)
 
@@ -39,6 +72,7 @@ class _SymbolCollector(cst.CSTVisitor):
         super().__init__()
         self.file = file
         self.source = source
+        self._offsets = _ByteOffsetTable(source)
         self.symbols: list[Symbol] = []
         self._scope: list[str] = []
         self._scope_is_class: list[bool] = []
@@ -52,13 +86,15 @@ class _SymbolCollector(cst.CSTVisitor):
         pos = self.get_metadata(PositionProvider, node)
         qn = ".".join(self._scope + [name])
         existing_doc = _extract_docstring(node)
+        byte_start = self._offsets.at(pos.start.line, pos.start.column)
+        byte_end = self._offsets.at(pos.end.line, pos.end.column)
         self.symbols.append(
             Symbol(
                 qualified_name=qn,
                 kind=kind,  # type: ignore[arg-type]
                 file=self.file,
-                byte_start=0,
-                byte_end=0,
+                byte_start=byte_start,
+                byte_end=byte_end,
                 line_start=pos.start.line,
                 line_end=pos.end.line,
                 signature=name,
