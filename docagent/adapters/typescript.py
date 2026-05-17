@@ -17,8 +17,10 @@ to work via :func:`docagent.index.store.Store.known_symbol_names`.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
+from typing import Literal
 
 from docagent.adapters.base import (
     BuildContext,
@@ -30,6 +32,25 @@ from docagent.adapters.base import (
     SymbolKind,
 )
 from docagent.parser import treesitter as ts
+
+
+@dataclass(frozen=True, slots=True)
+class ExportEntry:
+    """One row of a TS module's public surface.
+
+    * ``name`` — the public surface name (post-alias for ``export { Foo as Bar }``,
+      ``"*"`` for ``export * from``, ``"default"`` for default exports).
+    * ``kind`` — ``"re_export"`` when the entry rebinds another module's symbol,
+      ``"original"`` for declarations exported directly.
+    * ``source_module`` — the bare-string module specifier on the ``from``
+      clause (e.g. ``"./foo"``), or ``None`` for originals.
+    * ``alias_of`` — the original (pre-alias) name when aliased, else ``None``.
+    """
+
+    name: str
+    kind: Literal["re_export", "original"]
+    source_module: str | None
+    alias_of: str | None
 
 _TSX_EXTS = frozenset({".tsx", ".jsx"})
 _ALL_EXTS = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".d.ts")
@@ -109,7 +130,40 @@ def _load_query() -> str:
     )
 
 
+def _load_export_query() -> str:
+    return (
+        resources.files("docagent.adapters.queries")
+        .joinpath("typescript_exports.scm")
+        .read_text(encoding="utf-8")
+    )
+
+
 _QUERY = _load_query()
+_EXPORT_QUERY = _load_export_query()
+
+
+def _strip_string_literal(text: str) -> str:
+    """Strip surrounding ``"`` / ``'`` / backtick quotes from a string literal."""
+    text = text.strip()
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in ('"', "'", "`"):
+        return text[1:-1]
+    return text
+
+
+def _declared_names(node, src: bytes) -> list[str]:
+    """Walk a declaration node and return the declared identifier name(s)."""
+    out: list[str] = []
+    if node.type in ("function_declaration", "generator_function_declaration", "class_declaration", "abstract_class_declaration", "interface_declaration", "type_alias_declaration", "enum_declaration"):
+        name_node = node.child_by_field_name("name")
+        if name_node is not None:
+            out.append(src[name_node.start_byte : name_node.end_byte].decode("utf-8", errors="replace"))
+    elif node.type in ("lexical_declaration", "variable_declaration"):
+        for child in node.children:
+            if child.type == "variable_declarator":
+                name_node = child.child_by_field_name("name")
+                if name_node is not None and name_node.type == "identifier":
+                    out.append(src[name_node.start_byte : name_node.end_byte].decode("utf-8", errors="replace"))
+    return out
 
 
 def _grammar_for(path: Path) -> str:
@@ -288,6 +342,128 @@ class TypeScriptAdapter(LanguageAdapter):
                     existing_doc_byte_range=existing_doc_byte_range,
                 )
             )
+        return out
+
+    def extract_exports(self, parsed: ParseResult) -> list[ExportEntry]:
+        """Surface every ``export ...`` statement as a structured ``ExportEntry``.
+
+        Used by the TS module-discovery cascade to distinguish barrel files
+        (all-re-export, no original symbols) from empty modules.
+        """
+        grammar = _grammar_for(parsed.file)
+        captures = ts.run_query(grammar, parsed.tree, _EXPORT_QUERY)
+        src = parsed.source
+
+        # Deduplicate export_statement nodes by start_byte (tree-sitter may
+        # surface the same node under multiple matches).
+        seen_stmts: dict[int, object] = {}
+        for node, cap in captures:
+            if cap == "export.stmt":
+                seen_stmts.setdefault(node.start_byte, node)
+
+        out: list[ExportEntry] = []
+        for _, stmt in sorted(seen_stmts.items()):
+            out.extend(self._exports_from_statement(stmt, src))
+        return out
+
+    @staticmethod
+    def _exports_from_statement(stmt, src: bytes) -> list[ExportEntry]:
+        """Parse a single ``export_statement`` node into one-or-more entries."""
+        # Field-based lookups (tree-sitter-typescript reliably names these).
+        source_node = stmt.child_by_field_name("source")
+        decl_node = stmt.child_by_field_name("declaration")
+
+        # Locate child structure: export_clause? + raw star token + default kw.
+        export_clause = None
+        has_star = False
+        has_default = False
+        for child in stmt.children:
+            if child.type == "export_clause":
+                export_clause = child
+            elif child.type == "*":
+                has_star = True
+            elif child.type == "default":
+                has_default = True
+
+        source_module: str | None = None
+        if source_node is not None:
+            source_module = _strip_string_literal(
+                src[source_node.start_byte : source_node.end_byte].decode(
+                    "utf-8", errors="replace"
+                )
+            )
+
+        out: list[ExportEntry] = []
+
+        # `export * from "./foo"`
+        if has_star and source_module is not None:
+            out.append(
+                ExportEntry(
+                    name="*",
+                    kind="re_export",
+                    source_module=source_module,
+                    alias_of=None,
+                )
+            )
+            return out
+
+        # `export { ... } [from "..."]` — named or aliased re-export.
+        if export_clause is not None:
+            for spec in export_clause.children:
+                if spec.type != "export_specifier":
+                    continue
+                name_node = spec.child_by_field_name("name")
+                alias_node = spec.child_by_field_name("alias")
+                if name_node is None:
+                    continue
+                original = src[name_node.start_byte : name_node.end_byte].decode(
+                    "utf-8", errors="replace"
+                )
+                if alias_node is not None:
+                    surface = src[alias_node.start_byte : alias_node.end_byte].decode(
+                        "utf-8", errors="replace"
+                    )
+                    alias_of: str | None = original
+                else:
+                    surface = original
+                    alias_of = None
+                kind: Literal["re_export", "original"] = (
+                    "re_export" if source_module is not None else "original"
+                )
+                out.append(
+                    ExportEntry(
+                        name=surface,
+                        kind=kind,
+                        source_module=source_module,
+                        alias_of=alias_of,
+                    )
+                )
+            return out
+
+        # `export default <decl-or-expression>` — single "default" entry.
+        if has_default:
+            out.append(
+                ExportEntry(
+                    name="default",
+                    kind="original",
+                    source_module=None,
+                    alias_of=None,
+                )
+            )
+            return out
+
+        # `export function foo() {}` / `export class Bar {}` / `export const x = ...`
+        if decl_node is not None:
+            for name in _declared_names(decl_node, src):
+                out.append(
+                    ExportEntry(
+                        name=name,
+                        kind="original",
+                        source_module=None,
+                        alias_of=None,
+                    )
+                )
+
         return out
 
     def doc_comment_style(self, sym: Symbol) -> DocStyle:

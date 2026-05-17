@@ -617,3 +617,170 @@ class TestJsdocExistingDoc:
         # No spurious pairing, no error.
         by = _by_qn(_extract(adapter, src))
         assert by["foo"].existing_doc is None
+
+
+class TestExtractExports:
+    """`TypeScriptAdapter.extract_exports` surfaces all `export ...` shapes
+    so the discovery module can detect barrel-only files (RESEARCH.md
+    Gap B / locked drop rule).
+    """
+
+    @staticmethod
+    def _exports(adapter: TypeScriptAdapter, src: str) -> list[object]:
+        from pathlib import Path
+
+        parsed = adapter.parse(Path("sample.ts"), src.encode("utf-8"))
+        return list(adapter.extract_exports(parsed))
+
+    def test_A_export_star_from(self, adapter: TypeScriptAdapter) -> None:
+        from docagent.adapters.typescript import ExportEntry
+
+        entries = self._exports(adapter, 'export * from "./foo";\n')
+        assert entries == [
+            ExportEntry(
+                name="*",
+                kind="re_export",
+                source_module="./foo",
+                alias_of=None,
+            )
+        ]
+
+    def test_B_export_named_from(self, adapter: TypeScriptAdapter) -> None:
+        from docagent.adapters.typescript import ExportEntry
+
+        entries = self._exports(adapter, 'export { Bar } from "./baz";\n')
+        assert entries == [
+            ExportEntry(
+                name="Bar",
+                kind="re_export",
+                source_module="./baz",
+                alias_of=None,
+            )
+        ]
+
+    def test_C_aliased_re_export(self, adapter: TypeScriptAdapter) -> None:
+        from docagent.adapters.typescript import ExportEntry
+
+        entries = self._exports(adapter, 'export { Foo as Bar } from "./y";\n')
+        assert entries == [
+            ExportEntry(
+                name="Bar",
+                kind="re_export",
+                source_module="./y",
+                alias_of="Foo",
+            )
+        ]
+
+    def test_D_multiple_in_one_clause(self, adapter: TypeScriptAdapter) -> None:
+        from docagent.adapters.typescript import ExportEntry
+
+        entries = self._exports(adapter, 'export { Foo as Bar, Baz } from "./y";\n')
+        assert set(entries) == {
+            ExportEntry(
+                name="Bar",
+                kind="re_export",
+                source_module="./y",
+                alias_of="Foo",
+            ),
+            ExportEntry(
+                name="Baz",
+                kind="re_export",
+                source_module="./y",
+                alias_of=None,
+            ),
+        }
+
+    def test_E_export_function_declaration(
+        self, adapter: TypeScriptAdapter
+    ) -> None:
+        from docagent.adapters.typescript import ExportEntry
+
+        entries = self._exports(adapter, "export function foo() {}\n")
+        assert entries == [
+            ExportEntry(
+                name="foo",
+                kind="original",
+                source_module=None,
+                alias_of=None,
+            )
+        ]
+
+    def test_F_export_class_declaration(self, adapter: TypeScriptAdapter) -> None:
+        from docagent.adapters.typescript import ExportEntry
+
+        entries = self._exports(adapter, "export class Bar {}\n")
+        assert entries == [
+            ExportEntry(
+                name="Bar",
+                kind="original",
+                source_module=None,
+                alias_of=None,
+            )
+        ]
+
+    def test_G_export_default_function(
+        self, adapter: TypeScriptAdapter
+    ) -> None:
+        from docagent.adapters.typescript import ExportEntry
+
+        entries = self._exports(adapter, "export default function myDefault() {}\n")
+        assert entries == [
+            ExportEntry(
+                name="default",
+                kind="original",
+                source_module=None,
+                alias_of=None,
+            )
+        ]
+
+    def test_H_barrel_file_two_export_stars(
+        self, adapter: TypeScriptAdapter
+    ) -> None:
+        from docagent.adapters.typescript import ExportEntry
+
+        src = 'export * from "./a";\nexport * from "./b";\n'
+        entries = self._exports(adapter, src)
+        assert len(entries) == 2
+        assert all(e.kind == "re_export" for e in entries)  # type: ignore[attr-defined]
+        assert all(e.name == "*" for e in entries)  # type: ignore[attr-defined]
+        sources = {e.source_module for e in entries}  # type: ignore[attr-defined]
+        assert sources == {"./a", "./b"}
+        assert entries[0] == ExportEntry(
+            name="*", kind="re_export", source_module="./a", alias_of=None
+        )
+
+    def test_I_type_only_re_export(self, adapter: TypeScriptAdapter) -> None:
+        from docagent.adapters.typescript import ExportEntry
+
+        entries = self._exports(adapter, 'export type { Foo } from "./types";\n')
+        assert entries == [
+            ExportEntry(
+                name="Foo",
+                kind="re_export",
+                source_module="./types",
+                alias_of=None,
+            )
+        ]
+
+    def test_J_no_exports_yields_empty(
+        self, adapter: TypeScriptAdapter
+    ) -> None:
+        entries = self._exports(adapter, "function helper() {}\nconst x = 1;\n")
+        assert entries == []
+
+    def test_K_barrel_extracts_symbols_returns_empty(
+        self, adapter: TypeScriptAdapter
+    ) -> None:
+        """On a pure-barrel file, extract_symbols returns no definitions but
+        extract_exports surfaces the re-exports. This discriminator is what
+        the discovery module relies on.
+        """
+        from pathlib import Path
+
+        src = 'export * from "./a";\n'
+        parsed = adapter.parse(Path("barrel.ts"), src.encode("utf-8"))
+        assert adapter.extract_symbols(parsed) == []
+        exports = adapter.extract_exports(parsed)
+        assert len(exports) == 1
+        assert exports[0].kind == "re_export"
+        assert exports[0].name == "*"
