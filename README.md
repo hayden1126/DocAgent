@@ -89,6 +89,12 @@ Paths are repo-relative POSIX (`/`-separated). The line range is inclusive; a si
 - `docagent/artifacts/builtins.py` — v1 artifact registry. <!-- ground: docagent/artifacts/builtins.py:70-101 -->
 - `tests/integration/test_verify_flow.py` and `test_update_flow.py` — end-to-end coverage of the two CI-visible flows.
 
+## Languages
+
+Python and TypeScript / JavaScript are first-class: a dedicated adapter extracts symbols with byte- and line-precise ranges suitable for grounded citations. The TS adapter handles `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`, and `.d.ts`, covering functions, classes, methods, interfaces, type aliases, enums, namespaces, module-scope arrow-fn consts, and the common CommonJS `module.exports.foo = () => …` pattern. <!-- ground: docagent/adapters/typescript.py:34-39 --> <!-- ground: docagent/adapters/queries/typescript_tags.scm:14-83 --> Constructors and ECMAScript-private (`#foo`) members are deliberately excluded; in-place JSDoc generation is a v2 item. <!-- ground: docagent/adapters/typescript.py:91-96 -->
+
+Rust, Go, Java, and C++ are covered by a tree-sitter-only fallback adapter — symbol extraction works but cross-references are lexical, not semantic. <!-- ground: docagent/adapters/fallback.py:25-50 -->
+
 ## Status
 
 v1 alpha. Four artifacts ship end-to-end (`readme`, `agents_md`, `claude_md`, `llms_txt`); `api_reference`, `how_to_guides`, and `python_docstrings` are stubs deferred past alpha. <!-- ground: docagent/artifacts/builtins.py:80-95 --> The verifier is fully wired against on-disk artifacts; the `judge` gate is non-blocking and reports `skipped: judge not yet implemented` until its single-turn LLM call lands. <!-- ground: docagent/verify/judge.py:1-9 -->
