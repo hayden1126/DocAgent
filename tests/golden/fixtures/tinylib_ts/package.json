@@ -1,0 +1,9 @@
+{
+  "name": "tinylib-ts",
+  "version": "0.0.1",
+  "type": "module",
+  "description": "A tiny TS library fixture for DocAgent tests.",
+  "license": "MIT",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts"
+}
