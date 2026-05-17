@@ -97,6 +97,51 @@ _TOOLS_SPEC: list[dict[str, Any]] = [
 ]
 
 
+# ---- Tested-model allowlist -----------------------------------------------
+#
+# Models that have been measured to produce ≥80% verifier-citation
+# resolution on the tinylib_ts fixture. CONTEXT.md locks this list;
+# adding a new entry is a data-only change (re-run
+# scripts/measure_citation_rate.py first). Ollama is intentionally OUT
+# of the v1 set per the spike-results ADR — re-spike in v1.1.
+
+_TESTED_MODELS: frozenset[str] = frozenset(
+    {
+        "gemini/gemini-2.5-pro",
+        "gemini/gemini-2.5-flash",
+        "openrouter/anthropic/claude-sonnet-4-6",
+        "openrouter/anthropic/claude-opus-4-7",
+        "anthropic/claude-sonnet-4-6",
+        "anthropic/claude-opus-4-7",
+    }
+)
+
+# One WARN per model name per process. Tests reset to a fresh set().
+_warned_allowlist_models: set[str] = set()
+
+
+def _warn_unsupported_model(model: str) -> None:
+    """Emit ONE `[unsupported-model]` WARN per unknown model name per
+    process. Non-blocking: the run proceeds and the user gets a UX signal.
+
+    Allowlist membership check is `==`, not `startswith` — explicit
+    routes only, so e.g. `gemini/gemini-2.5-flash-lite` (not on the
+    allowlist) WARNs even though `gemini/gemini-2.5-flash` does not.
+    """
+    if model in _TESTED_MODELS:
+        return
+    if model in _warned_allowlist_models:
+        return
+    _log.warning(
+        "[unsupported-model] %r is not on the tested-model allowlist for "
+        "DocAgent (v1). Generation will proceed but citation quality is "
+        "not guaranteed. See README 'Multi-provider setup' for the "
+        "current allowlist.",
+        model,
+    )
+    _warned_allowlist_models.add(model)
+
+
 class BackendUnavailableError(RuntimeError):
     """LiteLLM not installed or model rejected by provider."""
 
@@ -117,6 +162,8 @@ class LiteLLMBackend:
         try:
             import litellm
             from litellm import completion
+
+            from docagent.backends._litellm_pricing import cost_for_response
         except ImportError as exc:
             raise BackendUnavailableError(
                 "The `litellm` package is not installed. "
@@ -124,6 +171,11 @@ class LiteLLMBackend:
             ) from exc
 
         litellm.drop_params = True
+
+        # Allowlist warn — fires AFTER lazy import (so missing-litellm
+        # hits BackendUnavailableError first), BEFORE the first
+        # completion() call. Non-blocking; the run proceeds.
+        _warn_unsupported_model(self.model)
 
         repo_root = request.repo_root.resolve()
         messages: list[dict[str, Any]] = [
@@ -134,16 +186,26 @@ class LiteLLMBackend:
         input_tokens = 0
         output_tokens = 0
         tool_calls_total = 0
+        accumulated_cost = 0.0
         chunks: list[str] = []
 
         for _turn in range(self.max_turns):
+            completion_kwargs: dict[str, Any] = {
+                "model": self.model,
+                "messages": messages,
+                "tools": _TOOLS_SPEC,
+                "tool_choice": "auto",
+            }
+            # OpenRouter opt-in: get authoritative server-reported cost
+            # populated on `response.usage.cost` (Tier 1 of the pricing
+            # shim). Most non-OpenRouter providers ignore unknown
+            # `extra_body` keys; a few reject unknown top-level kwargs,
+            # so prefer `extra_body` for cross-provider compatibility.
+            if self.model.startswith("openrouter/"):
+                completion_kwargs["extra_body"] = {"usage": {"include": True}}
+
             try:
-                response = completion(
-                    model=self.model,
-                    messages=messages,
-                    tools=_TOOLS_SPEC,
-                    tool_choice="auto",
-                )
+                response = completion(**completion_kwargs)
             except litellm.AuthenticationError as exc:  # type: ignore[attr-defined]
                 raise BackendUnavailableError(
                     f"LiteLLM authentication failed for model {self.model!r}. "
@@ -154,6 +216,10 @@ class LiteLLMBackend:
             if usage is not None:
                 input_tokens += getattr(usage, "prompt_tokens", 0) or 0
                 output_tokens += getattr(usage, "completion_tokens", 0) or 0
+
+            # Per-turn cost accumulation. The shim never raises; safe to
+            # call on every turn. Tier 3 returns 0.0 for unmapped models.
+            accumulated_cost += cost_for_response(self.model, response)
 
             if not response.choices:
                 continue
@@ -207,6 +273,7 @@ class LiteLLMBackend:
             tool_calls=tool_calls_total,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
+            cost_usd=accumulated_cost,
         )
 
 
