@@ -185,7 +185,11 @@ class ApiReferenceArtifact:
 
     def generate(self, task: Task, ctx: GenerationContext) -> DocPatch:
         dotted_name = task.payload["dotted_name"]
-        assert isinstance(dotted_name, str)
+        if not isinstance(dotted_name, str):
+            raise TypeError(
+                f"api_reference task payload['dotted_name'] must be str, "
+                f"got {type(dotted_name).__name__}"
+            )
         module, _ = self._planned[dotted_name]
 
         siblings = sibling_modules(dotted_name, self._all_modules)
@@ -261,8 +265,13 @@ class ApiReferenceArtifact:
         next ``init`` short-circuits the LLM call entirely.
         """
         store = ctx.store  # type: ignore[assignment]
-        # Reverse-lookup the dotted name from the target path.
-        # docs/reference/<dotted>.md → dotted
+        # Reverse-lookup the dotted name from the target path. This relies
+        # on the invariant: ``plan`` emits exactly one file per dotted name,
+        # named ``<dotted>.md``. ``Path.stem`` strips only the LAST suffix,
+        # so ``pkg.sub.mod.md`` correctly yields ``pkg.sub.mod``. If a
+        # future change writes additional suffixed pages (e.g.
+        # ``pkg.mod.types.md``), this reverse-lookup must move to a
+        # mapping that ``plan`` populates explicitly.
         stem = patch.target_path.stem
         if stem not in self._planned:
             return
