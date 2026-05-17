@@ -5,5 +5,10 @@
   "description": "A tiny TS library fixture for DocAgent tests.",
   "license": "MIT",
   "main": "dist/index.js",
-  "types": "dist/index.d.ts"
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./cli": "./dist/cli.js",
+    "./types": "./dist/types.js"
+  }
 }
