@@ -23,7 +23,7 @@ Active work shifts to budget telemetry next, then `how_to_guides`, then TS
 - [x] **Phase 5: Budget telemetry** — token counts + `--max-cost` (Anthropic-only)
 - [x] **Phase 6: `how_to_guides` artifact** — Diátaxis how-to quadrant
 - [x] **Phase 7: TypeScript `api_reference`** — broaden the multi-file artifact to TS repos
-- [ ] **Phase 8: Multi-provider backends** — Gemini / OpenRouter / Anthropic-direct via LiteLLM (Ollama deferred to v1.1 per spike 2026-05-17)
+- [x] **Phase 8: Multi-provider backends** — Gemini / OpenRouter / Anthropic-direct via LiteLLM (Ollama deferred to v1.1 per spike 2026-05-17). Shipped 2026-05-17.
 
 ## Phase Details
 
@@ -134,3 +134,11 @@ Active work shifts to budget telemetry next, then `how_to_guides`, then TS
   4. `AgentSDKBackend` remains the default; zero regression on the Anthropic path.
   5. Tested-model allowlist primitive ships; unknown models emit one `[unsupported-model]` WARN per model name (extends Phase 5's `_warned_models`).
   6. LiteLLM gated behind `docagent[multi]` extras; default install keeps the small dep tree.
+
+**Plans**: 6 plans across 6 waves
+- [x] 08-01-PLAN.md — Wave 1: port spike `litellm_backend.py` to main + pydantic≥2.10 floor + `[multi]` extras + LiteLLM logger silencer + rename measurement script (`b0fe3ae`)
+- [x] 08-02-PLAN.md — Wave 2: `_litellm_pricing.py` three-tier ladder (OpenRouter server cost → `completion_cost` → WARN+0) + add `GenerationResponse.cost_usd` (`1f6e9f1`)
+- [x] 08-03-PLAN.md — Wave 3: `_TESTED_MODELS` allowlist + `_warn_unsupported_model` dedup + per-turn cost accumulation + OpenRouter `usage.include` opt-in (`761003b`)
+- [x] 08-04-PLAN.md — Wave 4: CLI `--backend {agent_sdk,litellm}` on init + update + `BudgetTracker.external_cost` + orchestrator threads `response.cost_usd` at BOTH call sites + `--max-cost` cap on LiteLLM path (W1 self-policing grep gate `grep -cE 'external_cost' docagent/core/orchestrator.py == 2` enforced) (`5cbd624`)
+- [x] 08-05-PLAN.md — Wave 5: close remaining 9 spike-prototype gaps + RateLimitError retry (1 try, 2s sleep) + `tc.model_dump()` regression test + Usage-shape pin (`eae604e`)
+- [x] 08-06-PLAN.md — Wave 6: golden snapshot via `litellm.completion(mock_response=...)` on tinylib_ts (Anthropic-direct) + human-verify checkpoint approved + how-to-discovery confirmation (`3582559`)
