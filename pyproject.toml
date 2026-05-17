@@ -33,7 +33,7 @@ dependencies = [
     "tree-sitter-cpp>=0.23",
     "typer>=0.12",
     "rich>=13.7",
-    "pydantic>=2.7",
+    "pydantic>=2.10",
     "pathspec>=0.12",
     "gitpython>=3.1",
     "tomli>=2.0; python_version<'3.11'",
@@ -46,6 +46,12 @@ dev = [
     "ruff>=0.5",
     "mypy>=1.10",
     "pymarkdownlnt>=0.9",
+]
+# Phase 8 — multi-provider backend via LiteLLM (Gemini / OpenRouter / Anthropic-direct).
+# Gated behind extras to keep the default `pip install docagent` dep tree small.
+# See: .planning/decisions/0001-phase-8-multi-provider-backend.md
+multi = [
+    "litellm>=1.50",
 ]
 
 [project.scripts]
@@ -70,3 +76,10 @@ ignore = ["E501"]
 python_version = "3.11"
 strict = true
 warn_return_any = false
+
+# LiteLLM is an optional extra (`docagent[multi]`); not always installed.
+# Allow the missing import without weakening strict mode globally.
+[[tool.mypy.overrides]]
+module = ["litellm", "litellm.*"]
+ignore_missing_imports = true
+disallow_untyped_defs = false
