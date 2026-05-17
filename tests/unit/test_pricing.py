@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Generator
 
 import pytest
 
@@ -14,6 +15,22 @@ from docagent.pricing import estimate_cost, format_usd
 def _clean_warned_models(monkeypatch: pytest.MonkeyPatch) -> None:
     """Reset the dedup set per-test so test order is irrelevant."""
     monkeypatch.setattr(pricing, "_warned_models", set())
+
+
+@pytest.fixture(autouse=True)
+def _restore_logger_propagation() -> Generator[None, None, None]:
+    """`docagent._logging.setup_logging` sets `propagate=False` on the
+    `docagent` logger. caplog captures via the root logger, so if another
+    test in the same session called `setup_logging`, caplog can't see our
+    WARN records. Force propagation on for the duration of the test.
+    """
+    logger = logging.getLogger("docagent")
+    prior = logger.propagate
+    logger.propagate = True
+    try:
+        yield
+    finally:
+        logger.propagate = prior
 
 
 def test_estimate_cost_sonnet() -> None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Generator
 
 import pytest
 
@@ -13,6 +14,19 @@ from docagent.core.budget import BudgetSummary, BudgetTracker
 @pytest.fixture(autouse=True)
 def _clean_warned_models(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(pricing, "_warned_models", set())
+
+
+@pytest.fixture(autouse=True)
+def _restore_logger_propagation() -> Generator[None, None, None]:
+    """See note in test_pricing.py — undo `setup_logging`'s propagate=False
+    so caplog can capture WARN records from `docagent.pricing`."""
+    logger = logging.getLogger("docagent")
+    prior = logger.propagate
+    logger.propagate = True
+    try:
+        yield
+    finally:
+        logger.propagate = prior
 
 
 def test_fresh_tracker_is_zero() -> None:
