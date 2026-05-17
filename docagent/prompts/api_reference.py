@@ -7,15 +7,35 @@ public-surface table, see-also section, and footer hint.
 
 Markers are intentionally distinctive ASCII so a flaky model is unlikely to
 emit them by accident inside narrative prose.
+
+PROMPT_VERSION bump rationale (Phase 7): the constant moved from "1" to "2"
+when this template gained the ``{language_descriptor}`` placeholder + the
+optional TS-only JSDoc-section paragraph. Because the per-module fingerprint
+includes prompt_version, the first post-Phase-7 ``docagent update`` run will
+regenerate every existing Python ``api_reference`` page exactly once.
 """
 
-PROMPT_VERSION = "1"
+# Phase 7: bumped 1→2 for TS dispatch; one-time Python fingerprint invalidation, see 07-SUMMARY.md
+PROMPT_VERSION = "2"
 
 OPENER_MARKER = "<<<OPENER>>>"
 WORKFLOWS_MARKER = "<<<WORKFLOWS>>>"
 
+_LANGUAGE_DESCRIPTORS = {
+    "python": "Python",
+    "typescript": "TypeScript",
+}
+
+_JSDOC_SECTION_PY = ""
+_JSDOC_SECTION_TS = (
+    "The public-surface table above already contains JSDoc-derived "
+    "summaries (the text after the em-dash in the Signature column). "
+    "Do not re-paraphrase those — your opener should describe what the "
+    "MODULE is for, not restate each symbol's tag descriptions."
+)
+
 API_REFERENCE_PROMPT = """\
-You are writing one curated reference page for the Python module
+You are writing one curated reference page for the {language_descriptor} module
 `{dotted_name}` (source file: `{file_rel}`).
 
 A deterministic pipeline has already prepared the page's frontmatter, H1,
@@ -25,6 +45,8 @@ sections, delimited by the markers shown below.
 ## Public symbols in this module (for your context — already rendered as a
 ## table by the pipeline, do not repeat them):
 {symbol_table}
+
+{jsdoc_section}
 
 ## Sibling modules in the same package (for context only — do not document
 ## them here):
@@ -77,11 +99,16 @@ def format_prompt(
     file_rel: str,
     symbol_table: str,
     siblings_block: str,
+    language: str = "python",
 ) -> str:
+    descriptor = _LANGUAGE_DESCRIPTORS.get(language, _LANGUAGE_DESCRIPTORS["python"])
+    jsdoc_section = _JSDOC_SECTION_TS if language == "typescript" else _JSDOC_SECTION_PY
     return API_REFERENCE_PROMPT.format(
+        language_descriptor=descriptor,
         dotted_name=dotted_name,
         file_rel=file_rel,
         symbol_table=symbol_table,
+        jsdoc_section=jsdoc_section,
         siblings_block=siblings_block,
         opener_marker=OPENER_MARKER,
         workflows_marker=WORKFLOWS_MARKER,

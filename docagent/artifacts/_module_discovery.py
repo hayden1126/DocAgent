@@ -37,6 +37,7 @@ class ModuleSymbol:
     signature: str
     line_start: int
     line_end: int
+    existing_doc: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,20 +86,33 @@ def _file_to_dotted(file_rel: str) -> str | None:
 
 
 def discover_python_modules(
-    symbol_rows: list[tuple],  # (qualified_name, kind, file, line_start, line_end, signature)
+    symbol_rows: list[tuple],
 ) -> list[DiscoveredModule]:
     """Build the ordered list of documentable modules from raw symbol rows.
 
     ``symbol_rows`` is whatever a caller pulled from ``Store.symbols``; we
     keep the type loose so the store query and this function can evolve
-    independently. The expected tuple shape is
-    ``(qualified_name, kind, file, line_start, line_end, signature)``.
+    independently. The expected tuple shape is either:
+
+    * 6-field: ``(qualified_name, kind, file, line_start, line_end, signature)``
+    * 7-field: ``(qualified_name, kind, file, line_start, line_end, signature,
+      existing_doc)`` — Phase 7 extension so TS rows can ferry JSDoc into the
+      renderer.
+
+    Either form is accepted; a 6-field row gets ``existing_doc=None`` on the
+    ``ModuleSymbol``.
     """
     grouped: dict[str, list[ModuleSymbol]] = {}
     file_for_module: dict[str, str] = {}
 
     for row in symbol_rows:
-        qn, kind, file_rel, line_start, line_end, signature = row
+        qn = row[0]
+        kind = row[1]
+        file_rel = row[2]
+        line_start = row[3]
+        line_end = row[4]
+        signature = row[5] if len(row) > 5 else ""
+        existing_doc = row[6] if len(row) > 6 else None
         if not _is_public_leaf(qn):
             continue
         dotted = _file_to_dotted(file_rel)
@@ -111,6 +125,7 @@ def discover_python_modules(
                 signature=signature or "",
                 line_start=int(line_start),
                 line_end=int(line_end),
+                existing_doc=existing_doc,
             )
         )
         file_for_module.setdefault(dotted, file_rel)

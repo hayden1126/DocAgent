@@ -29,6 +29,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from docagent._logging import get_logger
+from docagent.adapters.typescript import ExportEntry
 from docagent.artifacts._api_reference_render import assemble_page
 from docagent.artifacts._module_discovery import (
     DiscoveredModule,
@@ -36,6 +37,7 @@ from docagent.artifacts._module_discovery import (
     parent_module,
     sibling_modules,
 )
+from docagent.artifacts._ts_module_discovery import discover_ts_modules
 from docagent.artifacts.registry import (
     Audience,
     DocPatch,
@@ -124,10 +126,12 @@ class ApiReferenceArtifact:
     out_dir: Path = field(default_factory=lambda: Path("docs/reference"))
     prompt_version: str = PROMPT_VERSION
 
-    # Per-run state: dotted_name -> (DiscoveredModule, fingerprint).
+    # Per-run state: dotted_name -> (DiscoveredModule, fingerprint, language).
     # Populated by plan(); read by generate() and post_write().
-    _planned: dict[str, tuple[DiscoveredModule, str]] = field(default_factory=dict)
+    _planned: dict[str, tuple[DiscoveredModule, str, str]] = field(default_factory=dict)
     _all_modules: list[str] = field(default_factory=list)
+    _export_edges: dict[str, list[ExportEntry]] = field(default_factory=dict)
+    _existing_docs: dict[str, dict[str, str]] = field(default_factory=dict)
 
     @property
     def target(self) -> Path:
@@ -138,33 +142,52 @@ class ApiReferenceArtifact:
 
     def plan(self, ctx: GenerationContext) -> list[Task]:
         store = ctx.store  # type: ignore[assignment]
-        symbol_rows = self._fetch_symbol_rows(store)
-        modules = discover_python_modules(symbol_rows)
+
+        # Per-language discovery → merge → deterministic sort by dotted_name
+        # → combined cap. The cap is intentionally NOT per-language: a mixed
+        # Python+TS repo with --max-modules=5 should see five modules total,
+        # not five per language, and ordering must be stable (RESEARCH.md
+        # Pitfall 5).
+        py_rows = self._fetch_symbol_rows_for(store, "python")
+        ts_rows = self._fetch_symbol_rows_for(store, "typescript")
+        ts_file_hashes = self._fetch_file_hashes_for(store, "typescript")
+        py_file_hashes = self._fetch_file_hashes_for(store, "python")
+
+        py_modules = discover_python_modules(py_rows)
+        ts_modules, ts_export_edges = discover_ts_modules(
+            ctx.repo_root, ts_rows, ts_file_hashes
+        )
+
+        merged: list[tuple[DiscoveredModule, str]] = [
+            *((m, "python") for m in py_modules),
+            *((m, "typescript") for m in ts_modules),
+        ]
+        merged.sort(key=lambda pair: pair[0].dotted_name)
 
         max_modules = int(ctx.config.get("max_modules", _DEFAULT_MAX_MODULES))
-        if max_modules and max_modules > 0:
-            if len(modules) > max_modules:
-                _log.info(
-                    "api_reference: capping at %d modules (%d discovered; "
-                    "raise --max-modules to expand)",
-                    max_modules, len(modules),
-                )
-                modules = modules[:max_modules]
+        if max_modules and max_modules > 0 and len(merged) > max_modules:
+            _log.info(
+                "api_reference: capping at %d modules (%d discovered; "
+                "raise --max-modules to expand)",
+                max_modules, len(merged),
+            )
+            merged = merged[:max_modules]
 
-        self._all_modules = [m.dotted_name for m in modules]
+        self._all_modules = [m.dotted_name for m, _ in merged]
         self._planned.clear()
+        self._export_edges.clear()
+        self._existing_docs.clear()
 
         model = self._model_id(ctx.backend)
-        file_hashes = self._fetch_file_hashes(store)
 
         tasks: list[Task] = []
-        for mod in modules:
-            fp = _fingerprint(
-                mod,
-                file_hashes.get(mod.file_rel),
-                self.prompt_version,
-                model,
+        for mod, lang in merged:
+            file_hash = (
+                ts_file_hashes.get(mod.file_rel)
+                if lang == "typescript"
+                else py_file_hashes.get(mod.file_rel)
             )
+            fp = _fingerprint(mod, file_hash, self.prompt_version, model)
             target = ctx.repo_root / self.out_dir / f"{mod.dotted_name}.md"
             prior = self._get_fingerprint(store, mod.dotted_name)
             if prior == fp and target.is_file():
@@ -173,12 +196,21 @@ class ApiReferenceArtifact:
                     mod.dotted_name,
                 )
                 continue
-            self._planned[mod.dotted_name] = (mod, fp)
+            self._planned[mod.dotted_name] = (mod, fp, lang)
+            if lang == "typescript":
+                self._export_edges[mod.dotted_name] = list(
+                    ts_export_edges.get(mod.dotted_name, [])
+                )
+                self._existing_docs[mod.dotted_name] = {
+                    sym.qualified_name: sym.existing_doc or ""
+                    for sym in mod.public_symbols
+                    if sym.existing_doc
+                }
             tasks.append(
                 Task(
                     artifact_id=self.id,
                     target_path=target,
-                    payload={"dotted_name": mod.dotted_name},
+                    payload={"dotted_name": mod.dotted_name, "language": lang},
                 )
             )
         return tasks
@@ -190,7 +222,7 @@ class ApiReferenceArtifact:
                 f"api_reference task payload['dotted_name'] must be str, "
                 f"got {type(dotted_name).__name__}"
             )
-        module, _ = self._planned[dotted_name]
+        module, _, language = self._planned[dotted_name]
 
         siblings = sibling_modules(dotted_name, self._all_modules)
         # Only link to a parent module that's also being generated. Many
@@ -206,6 +238,7 @@ class ApiReferenceArtifact:
             file_rel=module.file_rel,
             symbol_table=_symbol_table_block(module),
             siblings_block=_siblings_block(siblings, parent),
+            language=language,
         )
 
         backend = ctx.backend  # type: ignore[assignment]
@@ -225,6 +258,8 @@ class ApiReferenceArtifact:
             parent=parent,
             opener_md=opener_md,
             workflows_md=workflows_md,
+            export_edges=self._export_edges.get(dotted_name),
+            existing_docs=self._existing_docs.get(dotted_name),
         )
 
         return DocPatch(
@@ -275,7 +310,7 @@ class ApiReferenceArtifact:
         stem = patch.target_path.stem
         if stem not in self._planned:
             return
-        _, fingerprint = self._planned[stem]
+        _, fingerprint, _ = self._planned[stem]
         now = datetime.now(timezone.utc).isoformat()
         store.set_unit_fingerprint(  # type: ignore[attr-defined]
             self.id, stem, fingerprint, now
@@ -284,19 +319,31 @@ class ApiReferenceArtifact:
     # ---- helpers ----------------------------------------------------------
 
     @staticmethod
-    def _fetch_symbol_rows(store: object) -> list[tuple]:
+    def _fetch_symbol_rows_for(store: object, language_id: str) -> list[tuple]:
         cur = store.conn.execute(  # type: ignore[attr-defined]
-            "SELECT qualified_name, kind, file, line_start, line_end, signature "
-            "FROM symbols WHERE language_id = 'python'"
+            "SELECT qualified_name, kind, file, line_start, line_end, signature, "
+            "existing_doc FROM symbols WHERE language_id = ?",
+            (language_id,),
         )
         return list(cur.fetchall())
 
     @staticmethod
-    def _fetch_file_hashes(store: object) -> dict[str, str]:
+    def _fetch_file_hashes_for(store: object, language_id: str) -> dict[str, str]:
         cur = store.conn.execute(  # type: ignore[attr-defined]
-            "SELECT file, sha256 FROM file_hashes WHERE language_id = 'python'"
+            "SELECT file, sha256 FROM file_hashes WHERE language_id = ?",
+            (language_id,),
         )
         return {row[0]: row[1] for row in cur.fetchall()}
+
+    # Back-compat wrappers — some tests and callers reference the old names
+    # without a language argument; preserve them as Python shims.
+    @classmethod
+    def _fetch_symbol_rows(cls, store: object) -> list[tuple]:
+        return cls._fetch_symbol_rows_for(store, "python")
+
+    @classmethod
+    def _fetch_file_hashes(cls, store: object) -> dict[str, str]:
+        return cls._fetch_file_hashes_for(store, "python")
 
     @staticmethod
     def _model_id(backend: object) -> str:
