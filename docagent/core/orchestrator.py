@@ -163,8 +163,14 @@ class Orchestrator:
             # for plan() with multiple calls), then clear.
             if not self.dry_run:
                 for r in last_responses:
+                    # CALL SITE A — plan()-call drainage (Phase 6 P0 fix).
+                    # Threads r.cost_usd into the tracker so the LiteLLM
+                    # shim's authoritative cost flows through unchanged.
+                    # SDK path leaves cost_usd=None -> estimate_cost
+                    # fires as before. (Plan 08-04.)
                     per_call_cost = self.tracker.add(
-                        model, r.input_tokens, r.output_tokens, r.tool_calls
+                        model, r.input_tokens, r.output_tokens, r.tool_calls,
+                        external_cost=r.cost_usd,
                     )
                     run.input_tokens += r.input_tokens
                     run.output_tokens += r.output_tokens
@@ -220,11 +226,16 @@ class Orchestrator:
                         response = last_responses[-1] if last_responses else None
                         last_responses.clear()
                         if response is not None:
+                            # CALL SITE B — per-task post-write attribution.
+                            # Threads response.cost_usd into the tracker so
+                            # the LiteLLM shim's authoritative cost flows
+                            # through unchanged. (Plan 08-04.)
                             per_call_cost = self.tracker.add(
                                 model,
                                 response.input_tokens,
                                 response.output_tokens,
                                 response.tool_calls,
+                                external_cost=response.cost_usd,
                             )
                             run.input_tokens += response.input_tokens
                             run.output_tokens += response.output_tokens

@@ -6,6 +6,7 @@ import os
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import typer
 from rich.console import Console
@@ -20,6 +21,42 @@ from docagent.core.paths import to_repo_rel_posix
 from docagent.core.scanner import Scanner
 from docagent.index.store import open_store
 from docagent.pricing import format_usd
+
+# Plan 08-04 — backend selection.
+_BACKEND_CHOICES = ("agent_sdk", "litellm")
+_LITELLM_NO_MODEL_HINT = (
+    "Error: --backend litellm requires --model.\n"
+    "Try: --model gemini/gemini-2.5-pro            (set GEMINI_API_KEY)\n"
+    "     --model openrouter/anthropic/claude-sonnet-4-6   (set OPENROUTER_API_KEY)\n"
+    "     --model anthropic/claude-sonnet-4-6     (set ANTHROPIC_API_KEY)\n"
+    "Or omit --backend to use the default (Claude Agent SDK)."
+)
+
+
+def _validate_backend(value: str) -> str:
+    if value not in _BACKEND_CHOICES:
+        raise typer.BadParameter(
+            f"--backend must be one of {_BACKEND_CHOICES}; got {value!r}"
+        )
+    return value
+
+
+def _select_backend(backend: str, model: str | None) -> Any:
+    """Construct a backend per --backend / --model selection.
+
+    `litellm` requires `--model`; missing -> exit 2 with the multi-line
+    hint. Anything else routes through `AgentSDKBackend` (the default).
+    """
+    if backend == "litellm":
+        if not model:
+            typer.echo(_LITELLM_NO_MODEL_HINT, err=True)
+            raise typer.Exit(code=2)
+        from docagent.backends.litellm_backend import LiteLLMBackend
+
+        return LiteLLMBackend(model=model)
+    from docagent.backends.agent_sdk import AgentSDKBackend
+
+    return AgentSDKBackend(model=model) if model else AgentSDKBackend()
 
 app = typer.Typer(
     name="docagent",
@@ -184,9 +221,24 @@ def init(
             "DOCAGENT_MAX_COST. Aborts BETWEEN artifacts; exit code 3."
         ),
     ),
+    backend: str = typer.Option(
+        "agent_sdk",
+        "--backend",
+        callback=_validate_backend,
+        help="LLM backend: agent_sdk (default) or litellm (requires --model).",
+    ),
+    model: str = typer.Option(
+        "",
+        "--model",
+        help=(
+            "Model string. With --backend agent_sdk: passed to the Claude "
+            "Agent SDK. With --backend litellm: LiteLLM routing string "
+            "(e.g. gemini/gemini-2.5-pro, openrouter/anthropic/...)."
+        ),
+    ),
 ) -> None:
     """Full pass: scan repo, build index, generate all artifacts."""
-    from docagent.backends.agent_sdk import AgentSDKBackend, BackendUnavailableError
+    from docagent.backends.agent_sdk import BackendUnavailableError
     from docagent.core.orchestrator import Orchestrator
 
     start_time = time.monotonic()
@@ -201,8 +253,8 @@ def init(
         console.print("[yellow]skip-index[/yellow] — using existing index")
 
     registry = _registry()
-    backend = AgentSDKBackend()
-    preflight = getattr(backend, "_preflight", None)
+    backend_obj = _select_backend(backend, model or None)
+    preflight = getattr(backend_obj, "_preflight", None)
     if preflight is not None:
         try:
             preflight()
@@ -214,7 +266,7 @@ def init(
     orchestrator = Orchestrator(
         repo_root=repo,
         registry=registry,
-        backend=backend,
+        backend=backend_obj,
         store=store,
         only=tuple(only),
         dry_run=dry_run,
@@ -286,9 +338,24 @@ def update(
             "DOCAGENT_MAX_COST. Aborts BETWEEN artifacts; exit code 3."
         ),
     ),
+    backend: str = typer.Option(
+        "agent_sdk",
+        "--backend",
+        callback=_validate_backend,
+        help="LLM backend: agent_sdk (default) or litellm (requires --model).",
+    ),
+    model: str = typer.Option(
+        "",
+        "--model",
+        help=(
+            "Model string. With --backend agent_sdk: passed to the Claude "
+            "Agent SDK. With --backend litellm: LiteLLM routing string "
+            "(e.g. gemini/gemini-2.5-pro, openrouter/anthropic/...)."
+        ),
+    ),
 ) -> None:
     """Incremental refresh: regenerate artifacts affected by changes since the last run."""
-    from docagent.backends.agent_sdk import AgentSDKBackend, BackendUnavailableError
+    from docagent.backends.agent_sdk import BackendUnavailableError
     from docagent.core.affected import compute_affected_artifacts
     from docagent.core.orchestrator import Orchestrator
     from docagent.core.scanner import Scanner
@@ -385,8 +452,8 @@ def update(
         store.replace_symbols_for_file(rel, rows)
         store.upsert_file_hash(rel, sha, adapter.language_id, now)
 
-    backend = AgentSDKBackend()
-    preflight = getattr(backend, "_preflight", None)
+    backend_obj = _select_backend(backend, model or None)
+    preflight = getattr(backend_obj, "_preflight", None)
     if preflight is not None:
         try:
             preflight()
@@ -398,7 +465,7 @@ def update(
     orchestrator = Orchestrator(
         repo_root=repo,
         registry=registry,
-        backend=backend,
+        backend=backend_obj,
         store=store,
         changed_files=tuple(changed),
         only=tuple(affected),

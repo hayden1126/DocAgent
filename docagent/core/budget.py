@@ -46,10 +46,23 @@ class BudgetTracker:
         input_tokens: int,
         output_tokens: int,
         tool_calls: int,
+        external_cost: float | None = None,
     ) -> float:
         """Accumulate one call's tokens + cost. Returns the per-call cost
-        so the orchestrator can render the per-call progress line."""
-        per_call = estimate_cost(model, input_tokens, output_tokens)
+        so the orchestrator can render the per-call progress line.
+
+        When `external_cost is not None` (including 0.0), the tracker uses
+        that value verbatim instead of calling `pricing.estimate_cost(...)`.
+        This is how LiteLLM's authoritative per-call cost (from the
+        `_litellm_pricing` shim) flows through unchanged — bypassing the
+        Anthropic-only hand-maintained price table. The Phase 5 SDK path
+        leaves `external_cost=None` and the estimate_cost branch fires as
+        before.
+        """
+        if external_cost is not None:
+            per_call = external_cost
+        else:
+            per_call = estimate_cost(model, input_tokens, output_tokens)
         self.input_tokens += input_tokens
         self.output_tokens += output_tokens
         self.tool_calls += tool_calls
