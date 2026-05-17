@@ -63,6 +63,43 @@ _JSDOC_STYLE = DocStyle(
     placement="above",
 )
 
+_JSDOC_OPEN = b"/**"
+
+
+def _clean_jsdoc_body(raw: str) -> str:
+    """Strip ``/**``/``*/`` delimiters and per-line ``* `` prefixes.
+
+    Preserves blank lines between paragraphs (collapsing runs of 2+ blank
+    lines down to 1). ``@param``/``@returns``/``@throws`` tag text survives
+    verbatim; the cleaner does not parse or restructure tags.
+    """
+    text = raw
+    if text.startswith("/**"):
+        text = text[3:]
+    if text.endswith("*/"):
+        text = text[:-2]
+    lines = text.splitlines()
+    cleaned: list[str] = []
+    for line in lines:
+        stripped = line.lstrip()
+        if stripped.startswith("* "):
+            stripped = stripped[2:]
+        elif stripped.startswith("*"):
+            stripped = stripped[1:]
+        cleaned.append(stripped.rstrip())
+    # Collapse runs of 2+ blank lines to one.
+    collapsed: list[str] = []
+    blank_run = 0
+    for line in cleaned:
+        if line == "":
+            blank_run += 1
+            if blank_run <= 1:
+                collapsed.append(line)
+        else:
+            blank_run = 0
+            collapsed.append(line)
+    return "\n".join(collapsed).strip()
+
 
 def _load_query() -> str:
     return (
@@ -105,6 +142,23 @@ def _ancestor_scope_path(node, src: bytes) -> list[str]:
     return scope
 
 
+def _lines_between_are_blank(src: bytes, first_line: int, last_line: int) -> bool:
+    """Return True if every source line in [first_line, last_line] is blank.
+
+    Line indices are 0-based (matching tree-sitter's ``start_point``).
+    """
+    if first_line > last_line:
+        return True
+    text = src.decode("utf-8", errors="replace")
+    lines = text.splitlines()
+    for i in range(first_line, last_line + 1):
+        if i < 0 or i >= len(lines):
+            continue
+        if lines[i].strip() != "":
+            return False
+    return True
+
+
 def _is_private_method_name(name: str) -> bool:
     """Skip constructors and ECMAScript-private (`#foo`) members.
 
@@ -140,11 +194,17 @@ class TypeScriptAdapter(LanguageAdapter):
         # paired with the first inner method's name and ``Foo`` is lost.
         defs: list[tuple[object, SymbolKind]] = []
         names: list[object] = []
+        jsdoc_comments: list[object] = []
         for node, cap in captures:
             if cap == "name":
                 names.append(node)
             elif cap in _CAPTURE_TO_KIND:
                 defs.append((node, _CAPTURE_TO_KIND[cap]))
+            elif cap == "jsdoc.candidate" and (
+                src[node.start_byte : node.start_byte + 3] == _JSDOC_OPEN
+            ):
+                jsdoc_comments.append(node)
+        jsdoc_comments.sort(key=lambda n: n.end_point[0])
 
         def_to_name: dict[int, object] = {}
         for name_node in names:
@@ -190,6 +250,30 @@ class TypeScriptAdapter(LanguageAdapter):
                 .split("\n")[0]
             )
 
+            # Pair the latest /** comment whose end-line falls in
+            # [def.start_line - 2, def.start_line - 1] — i.e. immediately
+            # above, allowing exactly 0 or 1 blank line between. Intervening
+            # non-blank content (e.g. `const x = 1;`) breaks the pairing.
+            def_start_line = def_node.start_point[0]
+            existing_doc: str | None = None
+            existing_doc_byte_range: tuple[int, int] | None = None
+            best_match = None
+            for comment in jsdoc_comments:
+                gap = def_start_line - (comment.end_point[0] + 1)
+                if gap not in (0, 1):
+                    continue
+                if gap == 1 and not _lines_between_are_blank(
+                    src, comment.end_point[0] + 1, def_start_line - 1
+                ):
+                    continue
+                best_match = comment
+            if best_match is not None:
+                raw = src[best_match.start_byte : best_match.end_byte].decode(
+                    "utf-8", errors="replace"
+                )
+                existing_doc = _clean_jsdoc_body(raw)
+                existing_doc_byte_range = (best_match.start_byte, best_match.end_byte)
+
             out.append(
                 Symbol(
                     qualified_name=qn,
@@ -200,6 +284,8 @@ class TypeScriptAdapter(LanguageAdapter):
                     line_start=def_node.start_point[0] + 1,
                     line_end=def_node.end_point[0] + 1,
                     signature=signature,
+                    existing_doc=existing_doc,
+                    existing_doc_byte_range=existing_doc_byte_range,
                 )
             )
         return out

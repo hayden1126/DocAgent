@@ -303,3 +303,317 @@ def test_fallback_no_longer_registers_typescript() -> None:
     from docagent.adapters.fallback import EXTENSIONS
 
     assert "typescript" not in EXTENSIONS
+
+
+class TestJsdocExistingDoc:
+    """JSDoc /** ... */ blocks paired with the immediately-following def
+    populate ``Symbol.existing_doc``. Mirrors the Python adapter's docstring
+    pass-through but for TS source.
+    """
+
+    # ------------------------------------------------------------------
+    # Brief / structural cases (A1–A6)
+    # ------------------------------------------------------------------
+
+    def test_A1_brief_one_liner(self, adapter: TypeScriptAdapter) -> None:
+        src = "/** Brief one-liner. */\nexport function foo() {}\n"
+        sym = _by_qn(_extract(adapter, src))["foo"]
+        assert sym.existing_doc == "Brief one-liner."
+
+    def test_A2_multi_paragraph_preserves_blank_line(
+        self, adapter: TypeScriptAdapter
+    ) -> None:
+        src = (
+            "/**\n"
+            " * First paragraph.\n"
+            " *\n"
+            " * Second paragraph.\n"
+            " */\n"
+            "export function foo() {}\n"
+        )
+        doc = _by_qn(_extract(adapter, src))["foo"].existing_doc
+        assert doc is not None
+        assert "First paragraph." in doc
+        assert "Second paragraph." in doc
+        # Paragraph break preserved (a blank line between paragraphs).
+        assert "\n\n" in doc
+
+    def test_A3_no_preceding_jsdoc_yields_none(
+        self, adapter: TypeScriptAdapter
+    ) -> None:
+        # JSDoc here is attached to `paired`, not `lonely`.
+        src = (
+            "/** Pair me. */\n"
+            "export function paired() {}\n"
+            "\n"
+            "\n"
+            "\n"
+            "\n"
+            "\n"
+            "// not jsdoc\n"
+            "\n"
+            "export function lonely() {}\n"
+        )
+        by = _by_qn(_extract(adapter, src))
+        assert by["paired"].existing_doc == "Pair me."
+        assert by["lonely"].existing_doc is None
+
+    def test_A4_single_star_block_is_not_jsdoc(
+        self, adapter: TypeScriptAdapter
+    ) -> None:
+        src = "/* not jsdoc */\nexport function foo() {}\n"
+        assert _by_qn(_extract(adapter, src))["foo"].existing_doc is None
+
+    def test_A5_pairing_tolerates_one_blank_line(
+        self, adapter: TypeScriptAdapter
+    ) -> None:
+        src_one_blank = (
+            "/** Pair me. */\n"
+            "\n"
+            "export function foo() {}\n"
+        )
+        assert _by_qn(_extract(adapter, src_one_blank))["foo"].existing_doc == "Pair me."
+
+        src_three_blanks = (
+            "/** Pair me. */\n"
+            "\n"
+            "\n"
+            "\n"
+            "export function bar() {}\n"
+        )
+        assert _by_qn(_extract(adapter, src_three_blanks))["bar"].existing_doc is None
+
+        src_intervening = (
+            "/** Pair me. */\n"
+            "const x = 1;\n"
+            "export function baz() {}\n"
+        )
+        assert _by_qn(_extract(adapter, src_intervening))["baz"].existing_doc is None
+
+    def test_A6_no_jsdoc_regression_baseline(
+        self, adapter: TypeScriptAdapter
+    ) -> None:
+        src = "export function foo() {}\nexport function bar() {}\n"
+        syms = _extract(adapter, src)
+        assert len(syms) == 2
+        by = _by_qn(syms)
+        assert set(by) == {"foo", "bar"}
+        for sym in syms:
+            assert sym.existing_doc is None
+
+    # ------------------------------------------------------------------
+    # @param shapes (P1–P6)
+    # ------------------------------------------------------------------
+
+    def test_P1_single_param(self, adapter: TypeScriptAdapter) -> None:
+        src = (
+            "/**\n"
+            " * Brief.\n"
+            " * @param name The name.\n"
+            " */\n"
+            "export function greet(name: string) {}\n"
+        )
+        doc = _by_qn(_extract(adapter, src))["greet"].existing_doc
+        assert doc is not None
+        assert "@param name The name." in doc
+
+    def test_P2_multiple_params(self, adapter: TypeScriptAdapter) -> None:
+        src = (
+            "/**\n"
+            " * Brief.\n"
+            " * @param a First.\n"
+            " * @param b Second.\n"
+            " * @param c Third.\n"
+            " */\n"
+            "export function f(a: number, b: number, c: number) {}\n"
+        )
+        doc = _by_qn(_extract(adapter, src))["f"].existing_doc
+        assert doc is not None
+        assert "@param a First." in doc
+        assert "@param b Second." in doc
+        assert "@param c Third." in doc
+        # Order preserved.
+        assert doc.find("@param a") < doc.find("@param b") < doc.find("@param c")
+
+    def test_P3_typed_param(self, adapter: TypeScriptAdapter) -> None:
+        src = (
+            "/**\n"
+            " * @param {string} name desc\n"
+            " */\n"
+            "export function f(name: string) {}\n"
+        )
+        doc = _by_qn(_extract(adapter, src))["f"].existing_doc
+        assert doc is not None
+        assert "@param {string} name desc" in doc
+
+    def test_P4_optional_param(self, adapter: TypeScriptAdapter) -> None:
+        src = (
+            "/**\n"
+            " * @param [name=default] desc\n"
+            " */\n"
+            "export function f(name?: string) {}\n"
+        )
+        doc = _by_qn(_extract(adapter, src))["f"].existing_doc
+        assert doc is not None
+        assert "@param [name=default] desc" in doc
+
+    def test_P5_no_param_still_pairs(self, adapter: TypeScriptAdapter) -> None:
+        src = "/** Just a brief. */\nexport function f() {}\n"
+        assert _by_qn(_extract(adapter, src))["f"].existing_doc == "Just a brief."
+
+    def test_P6_malformed_param_survives(
+        self, adapter: TypeScriptAdapter
+    ) -> None:
+        src = (
+            "/**\n"
+            " * @param desc-only-no-name\n"
+            " */\n"
+            "export function f() {}\n"
+        )
+        doc = _by_qn(_extract(adapter, src))["f"].existing_doc
+        assert doc is not None
+        assert "@param desc-only-no-name" in doc
+
+    # ------------------------------------------------------------------
+    # @returns shapes (R1–R5)
+    # ------------------------------------------------------------------
+
+    def test_R1_untyped_returns(self, adapter: TypeScriptAdapter) -> None:
+        src = (
+            "/**\n"
+            " * @returns the result\n"
+            " */\n"
+            "export function f() {}\n"
+        )
+        doc = _by_qn(_extract(adapter, src))["f"].existing_doc
+        assert doc is not None
+        assert "@returns the result" in doc
+
+    def test_R2_typed_returns(self, adapter: TypeScriptAdapter) -> None:
+        src = (
+            "/**\n"
+            " * @returns {string} the result\n"
+            " */\n"
+            "export function f() {}\n"
+        )
+        doc = _by_qn(_extract(adapter, src))["f"].existing_doc
+        assert doc is not None
+        assert "@returns {string} the result" in doc
+
+    def test_R3_singular_return_spelling(
+        self, adapter: TypeScriptAdapter
+    ) -> None:
+        src = (
+            "/**\n"
+            " * @return the result\n"
+            " */\n"
+            "export function f() {}\n"
+        )
+        doc = _by_qn(_extract(adapter, src))["f"].existing_doc
+        assert doc is not None
+        assert "@return the result" in doc
+
+    def test_R4_multi_line_returns(self, adapter: TypeScriptAdapter) -> None:
+        src = (
+            "/**\n"
+            " * @returns first part of the description\n"
+            " * continuation line\n"
+            " */\n"
+            "export function f() {}\n"
+        )
+        doc = _by_qn(_extract(adapter, src))["f"].existing_doc
+        assert doc is not None
+        assert "@returns first part of the description" in doc
+        assert "continuation line" in doc
+        # No `* ` prefix should remain on the continuation line.
+        assert "* continuation line" not in doc
+
+    def test_R5_no_returns_still_pairs(
+        self, adapter: TypeScriptAdapter
+    ) -> None:
+        src = "/** Brief. */\nexport function f() {}\n"
+        assert _by_qn(_extract(adapter, src))["f"].existing_doc == "Brief."
+
+    # ------------------------------------------------------------------
+    # @throws shapes (T1–T5)
+    # ------------------------------------------------------------------
+
+    def test_T1_untyped_throws(self, adapter: TypeScriptAdapter) -> None:
+        src = (
+            "/**\n"
+            " * @throws Error when X\n"
+            " */\n"
+            "export function f() {}\n"
+        )
+        doc = _by_qn(_extract(adapter, src))["f"].existing_doc
+        assert doc is not None
+        assert "@throws Error when X" in doc
+
+    def test_T2_typed_throws(self, adapter: TypeScriptAdapter) -> None:
+        src = (
+            "/**\n"
+            " * @throws {TypeError} when X\n"
+            " */\n"
+            "export function f() {}\n"
+        )
+        doc = _by_qn(_extract(adapter, src))["f"].existing_doc
+        assert doc is not None
+        assert "@throws {TypeError} when X" in doc
+
+    def test_T3_singular_throw_spelling(
+        self, adapter: TypeScriptAdapter
+    ) -> None:
+        src = (
+            "/**\n"
+            " * @throw Error\n"
+            " */\n"
+            "export function f() {}\n"
+        )
+        doc = _by_qn(_extract(adapter, src))["f"].existing_doc
+        assert doc is not None
+        assert "@throw Error" in doc
+
+    def test_T4_multiple_throws(self, adapter: TypeScriptAdapter) -> None:
+        src = (
+            "/**\n"
+            " * @throws Error one\n"
+            " * @throws RangeError two\n"
+            " */\n"
+            "export function f() {}\n"
+        )
+        doc = _by_qn(_extract(adapter, src))["f"].existing_doc
+        assert doc is not None
+        assert "@throws Error one" in doc
+        assert "@throws RangeError two" in doc
+        assert doc.find("@throws Error one") < doc.find("@throws RangeError two")
+
+    def test_T5_no_throws_still_pairs(
+        self, adapter: TypeScriptAdapter
+    ) -> None:
+        src = "/** Brief. */\nexport function f() {}\n"
+        assert _by_qn(_extract(adapter, src))["f"].existing_doc == "Brief."
+
+    # ------------------------------------------------------------------
+    # Negative / pairing safety (N1, N2)
+    # ------------------------------------------------------------------
+
+    def test_N1_latest_closest_jsdoc_wins(
+        self, adapter: TypeScriptAdapter
+    ) -> None:
+        src = (
+            "/** A first. */\n"
+            "/** B second. */\n"
+            "export function foo() {}\n"
+        )
+        doc = _by_qn(_extract(adapter, src))["foo"].existing_doc
+        assert doc == "B second."
+
+    def test_N2_orphan_eof_comment(self, adapter: TypeScriptAdapter) -> None:
+        src = (
+            "export function foo() {}\n"
+            "\n"
+            "/** orphan at EOF */\n"
+        )
+        # No spurious pairing, no error.
+        by = _by_qn(_extract(adapter, src))
+        assert by["foo"].existing_doc is None

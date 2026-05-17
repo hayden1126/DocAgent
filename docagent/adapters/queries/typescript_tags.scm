@@ -82,3 +82,9 @@
 
 (module
   name: (identifier) @name) @def.module
+
+;; JSDoc candidates — top-level block comments. The adapter filters `/**` vs
+;; `/*` in Python (runtime portability across tree-sitter binding versions
+;; than #match? predicates) and pairs each `/**` block with the
+;; immediately-following @def.<kind> node.
+(comment) @jsdoc.candidate
