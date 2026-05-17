@@ -49,8 +49,8 @@ shipped have passing tests + live verification on this repo (`docagent verify` e
 - [ ] **BUDGET-03**: `--max-cost $X` soft guard — abort the orchestrator loop before exceeding the cap. Defaults to off.
 - [ ] **HOWTO-01**: `how_to_guides` artifact — generated under `docs/how-to/`; Diátaxis "how-to" quadrant only. Depends on `readme` and `api_reference`.
 - [x] **TSAPI-01**: TypeScript `api_reference` — module discovery via tsconfig.include / package.json exports; same artifact shape, language-agnostic at the orchestration layer. Shipped 2026-05-17 (Phase 7).
-- [ ] **BACKEND-01**: Multi-provider backends — Ollama, Gemini, litellm — selectable via `--backend <name>`; user supplies API keys via env vars; `AgentSDKBackend` remains default.
-- [ ] **BACKEND-02**: Per-provider pricing rows in `docagent/pricing.py`; Ollama maps to $0 input/output; unknown models within a provider trigger the same Opus-fallback WARN behavior.
+- [ ] **BACKEND-01**: Multi-provider backends — Gemini, OpenRouter, Anthropic-direct via `--backend litellm --model <litellm-model-string>`; user supplies API keys via env vars; `AgentSDKBackend` remains default. **Ollama deferred to v1.1** (spike 2026-05-17 measured 0% citation-emission rate on `llama3.1:8b` — see `.planning/decisions/0001-spike-results.md`; re-spike when Llama 3.3 70B / Qwen 2.5 Coder 32B+ ships).
+- [ ] **BACKEND-02**: LiteLLM-delegated pricing via `litellm.completion_cost(response)` for the LiteLLM path; existing Anthropic price table in `docagent/pricing.py` stays for the SDK path. Unknown models route through Opus-fallback WARN behavior (extended from Phase 5's `_warned_models` to cover per-provider unknowns).
 
 ## v2 Requirements
 

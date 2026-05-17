@@ -23,7 +23,7 @@ Active work shifts to budget telemetry next, then `how_to_guides`, then TS
 - [x] **Phase 5: Budget telemetry** — token counts + `--max-cost` (Anthropic-only)
 - [x] **Phase 6: `how_to_guides` artifact** — Diátaxis how-to quadrant
 - [x] **Phase 7: TypeScript `api_reference`** — broaden the multi-file artifact to TS repos
-- [ ] **Phase 8: Multi-provider backends** — Ollama / Gemini / litellm (reopens "one canonical backend")
+- [ ] **Phase 8: Multi-provider backends** — Gemini / OpenRouter / Anthropic-direct via LiteLLM (Ollama deferred to v1.1 per spike 2026-05-17)
 
 ## Phase Details
 
@@ -123,11 +123,14 @@ Active work shifts to budget telemetry next, then `how_to_guides`, then TS
 
 ### Phase 8: Multi-provider backends
 
-**Goal**: Add Ollama, Gemini, and litellm backends alongside `AgentSDKBackend`. Reopens the "one canonical backend" decision deliberately — Phase 5's price-table abstraction was designed to slot per-provider rates in.
+**Goal**: Add a single `LiteLLMBackend` alongside `AgentSDKBackend` that covers Gemini, OpenRouter, and Anthropic-direct via the LiteLLM SDK. ADR-0001 locks the architecture (LiteLLM only; `AgentSDKBackend` stays default). Ollama deferred to v1.1 per `0001-spike-results.md` — 0% citation-emission rate on `llama3.1:8b` in the spike (no tool calls fired).
 **Depends on**: Phase 5 (budget telemetry must be live so per-provider pricing has a home)
-**Requirements**: BACKEND-01, BACKEND-02
+**Requirements**: BACKEND-01 (narrowed), BACKEND-02
+**Architecture**: See `.planning/decisions/0001-phase-8-multi-provider-backend.md` and `.planning/decisions/0001-spike-results.md`.
 **Success Criteria**:
-  1. `docagent init --backend ollama` runs end-to-end against a local Ollama instance (free tier — pricing rows = $0).
-  2. `docagent init --backend gemini` and `--backend litellm` work with user-supplied API keys via env vars; pricing tables added for each.
-  3. Existing `AgentSDKBackend` remains the default; no regression on the Anthropic path.
-  4. Prompt forks are minimized via a shared prompt template layer — divergence reviewed at plan time.
+  1. `docagent init --backend litellm --model gemini/gemini-2.5-pro` runs end-to-end with user-supplied `GEMINI_API_KEY`; pricing flows through `litellm.completion_cost(response)`.
+  2. `--backend litellm --model openrouter/anthropic/claude-sonnet-4-6` works with `OPENROUTER_API_KEY`.
+  3. `--backend litellm --model anthropic/claude-sonnet-4-6` works with `ANTHROPIC_API_KEY` and produces output indistinguishable in quality from the Claude Agent SDK path.
+  4. `AgentSDKBackend` remains the default; zero regression on the Anthropic path.
+  5. Tested-model allowlist primitive ships; unknown models emit one `[unsupported-model]` WARN per model name (extends Phase 5's `_warned_models`).
+  6. LiteLLM gated behind `docagent[multi]` extras; default install keeps the small dep tree.
