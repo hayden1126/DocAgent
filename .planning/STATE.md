@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (scaffolded 2026-05-16)
 
 **Core value:** The verifier is the moat — every claim grounds to source, and CI breaks if the source moves.
-**Current focus:** Phase 6 (`how_to_guides`) — Phase 5 shipped.
+**Current focus:** Phase 7 (TS `api_reference`) — Phase 6 shipped 2026-05-17.
 
 ## Current Position
 
-Phase: 6 of 8 (next: `how_to_guides`)
-Plan: TBD
-Status: Phase 5 SHIPPED 2026-05-17 (5 wave commits + executor SUMMARY).
-Last activity: 2026-05-17 — Phase 5 (Budget telemetry) executed end-to-end. Latent bug in `agent_sdk.py` token extraction fixed, pricing+budget+orchestrator+CLI wired with 49 new tests. All 249 tests green; ruff/mypy clean on new code. W6–W9 warnings folded in cleanly.
+Phase: 7 of 8 (TS `api_reference`)
+Plan: not yet planned
+Status: Ready to plan (`/gsd:plan-phase 7`)
+Last activity: 2026-05-17 — Phase 6 (`how_to_guides`) shipped. P0 orchestrator token-attribution bug fixed (Plan 06-01), then full artifact: `_topic_discovery` + `_how_to_render` + prompt module + `HowToGuidesArtifact` end-to-end with sentinel-gated orphan flag + `--max-howtos` CLI flag + RecordedBackend queue + golden snapshot coverage. 6 commits, +55 tests (249 → 304). All ruff/mypy strict-clean on new code.
 
-Progress: [██████░░░░] ~63% (5 of 8 phases shipped)
+Progress: [████████░░] ~75% (6 of 8 phases shipped)
 
 ## Performance Metrics
 
 **Velocity (this session):**
-- Total commits: 16
-- Tests added: 70 → 249 (+179)
-- Phases shipped: Phase 2, Phase 3, Phase 4, Phase 5
+- Total commits: 22
+- Tests added: 70 → 304 (+234)
+- Phases shipped: Phase 2, Phase 3, Phase 4, Phase 5, Phase 6
 
 **By Phase:**
 
@@ -32,9 +32,9 @@ Progress: [██████░░░░] ~63% (5 of 8 phases shipped)
 | 3: TypeScript adapter | 4 (`fe041dd`–`8606190`) | 116 → 147 | Shipped |
 | 4: `api_reference` | 4 (`bd2144a`–`f99d882`) | 147 → 200 | Shipped |
 | 5: Budget telemetry | 5 (`c78c260`–`c70dca7`) | 200 → 249 | Shipped 2026-05-17 |
-| 6: `how_to_guides` | — | — | Planned (next) |
-| 7: TS api_reference | — | — | Planned |
-| 8: Multi-provider backends | — | — | Planned (new) |
+| 6: `how_to_guides` | 6 (`3dbeab7`–HEAD) | 249 → 304 | Shipped 2026-05-17 |
+| 7: TS api_reference | — | — | Planned (next) |
+| 8: Multi-provider backends | — | — | Planned |
 
 ## Accumulated Context
 
@@ -50,6 +50,7 @@ Progress: [██████░░░░] ~63% (5 of 8 phases shipped)
 - Budget telemetry (Phase 5): `DocPatch` NOT extended for tokens; orchestrator wraps the backend with `_InstrumentedBackend` to observe `GenerationResponse` per call. `Orchestrator.run()` return type unchanged (`list[ArtifactRun]`); tracker exposed as `orchestrator.tracker` instance attribute. Cap check is post-fact (one-artifact slack); pre-flight estimation is v2.
 - Pricing fallback: unknown model → Opus 4.7 rates + ONE WARN per distinct model name (deduplicated via module-private `_warned_models: set[str]`).
 - CLI summary: shared `_render_summary` helper for `init` + `update` parity; `--max-cost` negative validation via typer `callback=` so exit code 2 is clean; env-var path is intentionally lenient (logs DEBUG, falls back to 0).
+- Phase 6 (`how_to_guides`): topic-discovery LLM call lives in `plan()`, requiring the P0 orchestrator drain fix (Plan 06-01) — last_responses drained between `plan()` and the per-task loop. Per-page fingerprint = `sha256(prompt_version | model | slug | sorted(path@source_hash))`. Orphan flagging fires exactly once per run on the sentinel `_slugs_written == len(_slugs_to_write)` (== not >=); zero-task cache-hit runs fall back to flagging from the end of `plan()`. Single `PROMPT_VERSION` covers both discovery + per-page prompts (intentional coupling — any prompt change invalidates all how-to fingerprints). `orchestrator._last_ctx_config` exposes the per-run ctx so the CLI can read artifact-emitted entries (orphans/warnings) that live on the per-run copy, not the orchestrator's input config.
 
 ### Mid-session bugs caught & fixed (alpha hardening era)
 
@@ -76,5 +77,5 @@ Lead public announcement with `docagent verify` as the headline, not `init`. "Do
 
 - Branch: `main`
 - Remote: https://github.com/hayden1126/DocAgent (public, MIT)
-- Latest commit: `c70dca7` — feat(05-budget): wave 5 — --max-cost flag, DOCAGENT_MAX_COST env, summary
+- Latest commit: `537e455` — feat(06-06): RecordedBackend queue + how_to_guides golden snapshot
 - Repo memory lives at `~/.claude/projects/-home-hayden-DocAgent/memory/` (overview, alpha cut, post-alpha roadmap, architecture, feedback patterns, GitHub references). `.planning/` is a synchronized snapshot derived from those files on 2026-05-16.
