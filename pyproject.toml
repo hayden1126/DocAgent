@@ -90,3 +90,7 @@ disallow_untyped_defs = false
 # the regeneration benchmark) and produces ModuleNotFoundError collisions on
 # `tests.unit`, `tests.golden`, etc.
 testpaths = ["tests"]
+# Defense-in-depth: even with testpaths set, refuse to recurse into the
+# benchmark working dirs in case someone later adds a tests/ subtree under
+# benchmarks/ or runs `pytest benchmarks/...` directly.
+norecursedirs = ["benchmarks", "clones", "results", ".docagent"]
