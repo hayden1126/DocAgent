@@ -9,6 +9,31 @@ model behavior shifts we update a single function.
 
 from __future__ import annotations
 
+MIN_CLEAN_BYTES = 64
+"""Minimum length (in characters) of a cleaned artifact body. Outputs shorter
+than this almost always indicate over-strip (the LLM returned only a fence,
+preamble, or whitespace) and would otherwise be silently written to disk and
+locked into the fingerprint cache. Even the shortest legitimate artifact
+(an `llms.txt` stub) clears this floor."""
+
+
+class OutputTooSmallError(ValueError):
+    """Raised when a cleaner produces output below `MIN_CLEAN_BYTES`.
+
+    The orchestrator catches this, records it as a finding, and refuses
+    to write the artifact or upsert its digest — so a future run will
+    regenerate instead of cache-hitting on the broken output.
+    """
+
+    def __init__(self, *, actual: int, minimum: int, require_h1: bool) -> None:
+        self.actual = actual
+        self.minimum = minimum
+        self.require_h1 = require_h1
+        super().__init__(
+            f"cleaned output too small: {actual} < {minimum} bytes "
+            f"(require_h1={require_h1})"
+        )
+
 
 def clean_markdown_output(text: str, *, require_h1: bool = True) -> str:
     """Strip preambles, trailing commentary, and outer fences from LLM output.
@@ -37,6 +62,13 @@ def clean_markdown_output(text: str, *, require_h1: bool = True) -> str:
             if line.startswith("# "):
                 stripped = "\n".join(lines[i:]).strip()
                 break
+
+    if len(stripped) < MIN_CLEAN_BYTES:
+        raise OutputTooSmallError(
+            actual=len(stripped),
+            minimum=MIN_CLEAN_BYTES,
+            require_h1=require_h1,
+        )
 
     if not stripped.endswith("\n"):
         stripped += "\n"

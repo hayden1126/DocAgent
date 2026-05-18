@@ -280,6 +280,9 @@ def init(
         status = "ok" if r.verify_ok and r.error is None else "FAIL"
         color = "green" if status == "ok" else "red"
         console.print(f"[{color}]{status}[/{color}] {r.artifact_id}")
+        if not r.verify_ok and not r.writes and not r.error:
+            first = r.findings[0] if r.findings else "no findings recorded"
+            console.print(f"  [red]FAIL[/red] {r.artifact_id}: not written ({first})")
         if r.error:
             console.print(f"  [red]error:[/red] {r.error}")
         for f in r.findings[:10]:
@@ -480,6 +483,9 @@ def update(
         status = "ok" if r.verify_ok and r.error is None else "FAIL"
         color = "green" if status == "ok" else "red"
         console.print(f"[{color}]{status}[/{color}] {r.artifact_id}")
+        if not r.verify_ok and not r.writes and not r.error:
+            first = r.findings[0] if r.findings else "no findings recorded"
+            console.print(f"  [red]FAIL[/red] {r.artifact_id}: not written ({first})")
         if r.error:
             console.print(f"  [red]error:[/red] {r.error}")
         for f in r.findings[:10]:

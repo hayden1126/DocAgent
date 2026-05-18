@@ -11,6 +11,7 @@ from typing import Any
 from rich.console import Console
 
 from docagent._logging import get_logger
+from docagent.artifacts._cleaners import OutputTooSmallError
 from docagent.artifacts.registry import DocArtifact, DocPatch, GenerationContext, Registry
 from docagent.backends.base import GenerationRequest, GenerationResponse, LLMBackend
 from docagent.core.budget import BudgetTracker
@@ -185,6 +186,20 @@ class Orchestrator:
                 except NotImplementedError as exc:
                     _log.info("generate not wired: %s (%s)", artifact.id, exc)
                     run.error = f"generate not wired: {exc}"
+                    continue
+                except OutputTooSmallError as exc:
+                    # Over-strip / empty LLM response. Refuse to write and
+                    # refuse to cache so the next run regenerates instead of
+                    # short-circuiting on a stale digest.
+                    _log.warning(
+                        "output too small for %s: %d < %d bytes",
+                        artifact.id, exc.actual, exc.minimum,
+                    )
+                    run.verify_ok = False
+                    run.findings.append(
+                        f"output too small ({exc.actual} < {exc.minimum} bytes) "
+                        f"— likely over-strip / empty LLM response"
+                    )
                     continue
                 except Exception as exc:
                     _log.exception("generate failed for %s", artifact.id)
