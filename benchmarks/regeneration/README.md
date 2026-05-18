@@ -72,8 +72,15 @@ python -m benchmarks.regeneration.score --aggregate
 Outputs land in `results/<repo>-<sha>/`:
 - `original/` — preserved copies of the stripped docs
 - `regenerated/` — DocAgent output
-- `metrics.json` — per-repo scores
-- `divergences.jsonl` — one row per detected disagreement with resolution
+- `run.json` — RunRecord (init/verify exit codes, write_rate, cost,
+  timeout notes)
+- `metrics.json` (or `metrics.identity.json` / `metrics.empty.json`
+  in baseline mode) — RepoMetrics: per-judge passes with FActScore,
+  topic coverage, 3-axis rubric (completeness, helpfulness,
+  truthfulness), divergence resolution bucket, judge cost, and the
+  inter-judge axis disagreement summary
+- `claims.<judge_or_baseline>.jsonl` — per-claim FActScore verdicts
+  (supported / unsupported / contradicted) with citations
 
 ## Status
 
