@@ -1,112 +1,59 @@
-# DocAgent
+# docagent
 
-Repository documentation agent for humans and coding agents. Generates and verifies READMEs, AGENTS.md, CLAUDE.md, and llms.txt — and breaks CI when a documentation citation no longer matches the source. <!-- ground: pyproject.toml:6-8 -->
+Repository documentation agent for humans and coding agents. <!-- ground: pyproject.toml:8-8 -->
 
-## What it does
+## Why
 
-Most AI documentation tools generate plausible prose and stop there. DocAgent makes documentation *checkable*: every non-trivial claim carries a `<!-- ground: path:line-start-line-end -->` HTML comment, and a deterministic-first verifier confirms that the cited file and line range still match what the prose says. <!-- ground: docagent/verify/citations.py:1-6 -->
-
-The gate order is cheap-first: structural lint (non-blocking) → links → citations → docs-site dry-run (non-blocking) → secrets → LLM judge (non-blocking, tiebreaker only). Truth-checking gates block writes; stylistic gates do not. <!-- ground: docagent/verify/pipeline.py:46-64 -->
-
-Output is dual-track. Human files (`README.md`) and agent files (`AGENTS.md` per the Linux Foundation spec, `CLAUDE.md` per Anthropic, `llms.txt` per llmstxt.org) share an artifact DAG so dependents (e.g. AGENTS.md citing README) regenerate in the right order. <!-- ground: docagent/artifacts/builtins.py:71-92 -->
+Repositories accumulate stale READMEs, missing how-to guides, and undocumented APIs faster than humans can maintain them, and AI coding assistants increasingly need their own orientation files (`AGENTS.md`, `CLAUDE.md`, `llms.txt`) alongside the human-facing docs. DocAgent treats documentation as a set of verifiable artifacts driven by a DAG, generates them with an LLM backend, and verifies every claim against the actual source via a deterministic-first pipeline. <!-- ground: docagent/artifacts/builtins.py:1-15 --> The verifier is built around ground-citation comments (`<!-- ground: path:start-end -->`) so generated docs stay anchored to real code. <!-- ground: docagent/cli.py:524-532 -->
 
 ## Install
+
+DocAgent targets Python 3.11+ and is distributed as the `docagent` package. <!-- ground: pyproject.toml:11-11 --> <!-- ground: pyproject.toml:6-6 -->
 
 ```bash
 pip install docagent
 ```
 
-Requires Python ≥ 3.11. <!-- ground: pyproject.toml:11-11 --> Installs a `docagent` console script. <!-- ground: pyproject.toml:51-52 -->
-
-For development:
+For the multi-provider backend (Gemini, OpenRouter, Anthropic-direct via LiteLLM), install the optional `multi` extra: <!-- ground: pyproject.toml:50-55 -->
 
 ```bash
-pip install -e ".[dev]"
+pip install 'docagent[multi]'
 ```
-
-<!-- ground: pyproject.toml:42-49 -->
 
 ## Quickstart
 
+Installation registers a single `docagent` CLI entry point. <!-- ground: pyproject.toml:57-58 --> It exposes three commands — `init`, `update`, and `verify`. <!-- ground: docagent/cli.py:195-196 --> <!-- ground: docagent/cli.py:320-321 --> <!-- ground: docagent/cli.py:517-518 -->
+
 ```bash
-docagent init      # full pass: scan repo, build index, generate all artifacts
-docagent update    # incremental refresh based on git diff since last init
-docagent verify    # run the deterministic-first verifier pipeline
+# Full pass: scan repo, build symbol index, generate all artifacts.
+docagent init
+
+# Incremental refresh: regenerate only artifacts affected by recent changes.
+docagent update
+
+# Re-run the deterministic-first verifier against artifacts already on disk.
+docagent verify
 ```
+<!-- ground: docagent/cli.py:240-240 --> <!-- ground: docagent/cli.py:357-357 --> <!-- ground: docagent/cli.py:525-532 -->
 
-<!-- ground: docagent/cli.py:84-95 --> <!-- ground: docagent/cli.py:153-161 --> <!-- ground: docagent/cli.py:300-315 -->
+Useful flags on `init` / `update`: `--dry-run` prints diffs without writing, `--only <artifact_id>` restricts the run to specific artifacts, and `--max-cost USD` caps total LLM spend. <!-- ground: docagent/cli.py:201-223 --> Switch to the LiteLLM multi-provider backend with `--backend litellm --model <provider/model>` (default is the Claude Agent SDK). <!-- ground: docagent/cli.py:26-59 -->
 
-Global flags: `--debug` emits DEBUG-level logs to stderr (also: `DOCAGENT_DEBUG=1`); `--version` prints the version and exits. <!-- ground: docagent/cli.py:41-50 -->
+## Architecture
 
-`init` accepts `--only <id>` (repeatable), `--dry-run`, and `--skip-index` to reuse an existing `.docagent/index.db`. <!-- ground: docagent/cli.py:85-93 -->
+DocAgent is organized into orthogonal packages under `docagent/`:
 
-`update` resolves affected artifacts via two signals — the identifier-mention index and on-disk citation paths — so renaming a function only refreshes the artifacts that actually mention it. <!-- ground: docagent/core/affected.py:1-18 -->
-
-`verify` works against on-disk artifacts. It reads the registry, picks up any artifact recorded in `.docagent/index.db` or discovered on disk by its conventional target path, and runs the pipeline. Use `--strict` to fail on any finding, including non-blocking warnings. <!-- ground: docagent/cli.py:300-315 -->
-
-## GitHub Action
-
-Wire the verifier into CI so a PR that breaks a citation goes red:
-
-```yaml
-# .github/workflows/docs.yml
-name: docs
-on: [pull_request]
-permissions:
-  contents: read
-  pull-requests: write
-jobs:
-  verify:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: hayden1126/DocAgent@main
-        with:
-          strict: false       # or 'true' to fail on non-blocking findings
-          # only: 'readme,agents_md'  # restrict to specific artifacts
-```
-
-The Action runs `docagent verify` — pure-deterministic, no Claude API key required. On PR failure it posts a sticky comment with the verifier output. <!-- ground: action.yml:1-7 --> <!-- ground: action.yml:85-105 -->
-
-## Grounding citations
-
-The convention is a single HTML comment placed immediately after the sentence it grounds:
-
-```markdown
-The scanner skips `.docagent/` by default. <!-- ground: docagent/ignore.py:9-31 -->
-```
-
-Paths are repo-relative POSIX (`/`-separated). The line range is inclusive; a single line can be written as `path:42` instead of `path:42-42`. <!-- ground: docagent/citations.py:1-12 --> The grammar reserves `:` as the delimiter — paths may not contain `:` or whitespace. <!-- ground: docagent/citations.py:21-23 -->
-
-## Where to look
-
-- `docagent/cli.py` — Typer app with `init`, `update`, `verify` commands. <!-- ground: docagent/cli.py:19-24 -->
-- `docagent/core/orchestrator.py` — drives `plan → generate → verify → write`, plus the post-write hook that populates the mention index. <!-- ground: docagent/core/orchestrator.py:49-91 -->
-- `docagent/core/affected.py` — two-signal incremental resolver used by `update`. <!-- ground: docagent/core/affected.py:71-92 -->
-- `docagent/verify/pipeline.py` — gate ordering and blocking semantics. <!-- ground: docagent/verify/pipeline.py:46-64 -->
-- `docagent/citations.py` — single source of truth for the citation grammar. <!-- ground: docagent/citations.py:11-21 -->
-- `docagent/backends/agent_sdk.py` — Claude Agent SDK backend; restricted to `Read/Glob/Grep`. <!-- ground: docagent/backends/agent_sdk.py:34-39 -->
-- `docagent/artifacts/builtins.py` — v1 artifact registry. <!-- ground: docagent/artifacts/builtins.py:71-92 -->
-- `tests/integration/test_verify_flow.py` and `test_update_flow.py` — end-to-end coverage of the two CI-visible flows.
-
-## Languages
-
-Python and TypeScript / JavaScript are first-class: a dedicated adapter extracts symbols with byte- and line-precise ranges suitable for grounded citations. The TS adapter handles `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`, and `.d.ts`, covering functions, classes, methods, interfaces, type aliases, enums, namespaces, module-scope arrow-fn consts, and the common CommonJS `module.exports.foo = () => …` pattern. <!-- ground: docagent/adapters/typescript.py:34-39 --> <!-- ground: docagent/adapters/queries/typescript_tags.scm:14-83 --> Constructors and ECMAScript-private (`#foo`) members are deliberately excluded; in-place JSDoc generation is a v2 item. <!-- ground: docagent/adapters/typescript.py:91-96 -->
-
-Rust, Go, Java, and C++ are covered by a tree-sitter-only fallback adapter — symbol extraction works but cross-references are lexical, not semantic. <!-- ground: docagent/adapters/fallback.py:25-50 -->
-
-## `api_reference`
-
-For each public Python module the scanner indexed, `api_reference` writes one curated landing page at `docs/reference/<dotted.name>.md`. <!-- ground: docagent/artifacts/api_reference.py:208-213 --> Each page combines a deterministic public-surface table (read directly from the symbol index — no LLM) with an LLM-written opener paragraph and 1-3 grounded worked examples, plus a see-also section linking to sibling and parent modules. <!-- ground: docagent/artifacts/_api_reference_render.py:107-138 --> Per-module fingerprinting via the new `artifact_unit_fingerprints` table makes re-runs idempotent — unchanged source skips the LLM call entirely. <!-- ground: docagent/artifacts/api_reference.py:60-76 -->
-
-The fingerprint includes the backend's `model` identifier. When `model=None` (the default — let the Agent SDK pick), it's recorded as the stable string `"sdk-default"` so SDK updates don't silently invalidate the cache. <!-- ground: docagent/artifacts/api_reference.py:289-294 --> First-time use of an explicit `--model` setting therefore invalidates every prior fingerprint once.
-
-Use `--max-modules N` on `init` to cap the per-run cost (default 25, set to `0` for unlimited). <!-- ground: docagent/cli.py:93-97 --> The artifact deliberately does NOT generate per-symbol pages — point [`mkdocstrings`](https://mkdocstrings.github.io/) or [`pdoc`](https://pdoc.dev/) at the same source for that.
+- **`docagent.cli`** — Typer-based entry point for `init` / `update` / `verify`; selects a backend and constructs the orchestrator. <!-- ground: docagent/cli.py:61-66 --> <!-- ground: docagent/cli.py:44-59 -->
+- **`docagent.artifacts`** — Each artifact (`readme`, `api_reference`, `how_to_guides`, `agents_md`, `claude_md`, `llms_txt`, `python_docstrings`) owns its own `plan → generate → verify` cycle and declares dependencies in a DAG. <!-- ground: docagent/artifacts/builtins.py:7-15 -->
+- **`docagent.core`** — Orchestrator, scanner, diff/state tracking, budget enforcement, and affected-artifact resolution drive the DAG. <!-- ground: docagent/core/orchestrator.py:1-21 --> <!-- ground: docagent/cli.py:266-277 -->
+- **`docagent.adapters` + `docagent.parser`** — Language adapters using libcst/jedi for Python and tree-sitter for Rust/Go/TypeScript/Java/C++ extract symbols and signatures. <!-- ground: pyproject.toml:25-33 -->
+- **`docagent.index`** — SQLite-backed symbol/mention store at `.docagent/index.db`; populated by the scanner during `init`. <!-- ground: docagent/cli.py:164-192 --> <!-- ground: docagent/cli.py:203-204 -->
+- **`docagent.backends`** — Pluggable LLM backends: `agent_sdk` (default, Claude Agent SDK) and `litellm` (multi-provider; `--model` required). <!-- ground: docagent/cli.py:44-59 -->
+- **`docagent.verify`** — Deterministic-first verification pipeline: ground-citation resolution, link checks, secrets scan, and per-artifact gates. <!-- ground: docagent/cli.py:533-540 -->
 
 ## Status
 
-v1 alpha. Five artifacts ship end-to-end (`readme`, `agents_md`, `claude_md`, `llms_txt`, `api_reference`); `how_to_guides` and `python_docstrings` remain stubs (the latter cut from v1 — in-place source mutation is too high-risk for an experimental flag). <!-- ground: docagent/artifacts/builtins.py:71-92 --> The verifier is fully wired against on-disk artifacts; the `judge` gate is non-blocking and reports `skipped: judge not yet implemented` until its single-turn LLM call lands. <!-- ground: docagent/verify/judge.py:1-9 -->
+Pre-Alpha. <!-- ground: pyproject.toml:14-15 --> The artifact pipeline runs end-to-end and self-verifies through the deterministic gates, but versioning is still `0.1.0-dev` and APIs may change. <!-- ground: pyproject.toml:7-7 --> <!-- ground: docagent/__init__.py:3-3 -->
 
 ## License
 
-MIT. <!-- ground: LICENSE:1-3 -->
+MIT. <!-- ground: LICENSE:1-1 --> <!-- ground: pyproject.toml:10-10 -->
