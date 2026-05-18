@@ -1,0 +1,58 @@
+# Regeneration benchmark corpus.
+#
+# Each entry pins a repo to a specific commit so runs are reproducible
+# even after upstream changes. Update `sha` deliberately; don't auto-bump.
+#
+# Selection criteria:
+#   - Substantial hand-written docs (README + how-to or guide content)
+#   - Fits in a 200k-context window comfortably
+#   - Not in DocAgent's golden fixtures
+#   - Mix of CLI / library / framework shapes
+
+repos:
+  - name: tinydb
+    language: python
+    url: https://github.com/msiemens/tinydb
+    sha: null  # TODO: pin before first run, e.g. `git ls-remote https://... HEAD`
+    notes: "Already validated in v1.0 live test; serves as sanity-check baseline."
+
+  - name: click
+    language: python
+    url: https://github.com/pallets/click
+    sha: null
+    notes: "CLI library; docs/ directory is substantial; good API-reference target."
+
+  - name: typer
+    language: python
+    url: https://github.com/fastapi/typer
+    sha: null
+    notes: "CLI built on click; tutorial-heavy docs."
+
+  - name: httpx
+    language: python
+    url: https://github.com/encode/httpx
+    sha: null
+    notes: "Async-capable HTTP client; docs cover both sync and async surfaces."
+
+  - name: rich
+    language: python
+    url: https://github.com/Textualize/rich
+    sha: null
+    notes: "Large API surface; how-to-style docs."
+
+  - name: zod
+    language: typescript
+    url: https://github.com/colinhacks/zod
+    sha: null
+    notes: "TS schema library; tests the TS api_reference artifact."
+
+  - name: hono
+    language: typescript
+    url: https://github.com/honojs/hono
+    sha: null
+    notes: "Web framework; mixed JS/TS; tests cross-file resolution."
+
+# Repos to AVOID:
+#   - fastapi: too large for clean context windows in single pass
+#   - requests: docs are partially auto-generated (Sphinx) — confounds comparison
+#   - tanstack-query: very large; defer to v1.1 expanded corpus

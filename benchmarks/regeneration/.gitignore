@@ -1,0 +1,4 @@
+clones/
+results/
+*.log
+__pycache__/
