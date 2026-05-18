@@ -172,6 +172,12 @@ class LiteLLMBackend:
             ) from exc
 
         litellm.drop_params = True
+        # Suppress LiteLLM's "Give Feedback / Get Help" banner that
+        # prints to stderr on exceptions. The Phase 8 logger silencer
+        # catches log-channel output; this catches the print-channel
+        # output that prefixes our friendly BackendUnavailableError
+        # message with a colored upstream traceback.
+        litellm.suppress_debug_info = True
 
         # Allowlist warn — fires AFTER lazy import (so missing-litellm
         # hits BackendUnavailableError first), BEFORE the first
@@ -210,8 +216,9 @@ class LiteLLMBackend:
             except litellm.AuthenticationError as exc:  # type: ignore[attr-defined]
                 raise BackendUnavailableError(
                     f"LiteLLM authentication failed for model {self.model!r}. "
-                    f"Ensure the appropriate API key env var is set (GEMINI_API_KEY, "
-                    f"OPENROUTER_API_KEY, or ANTHROPIC_API_KEY)."
+                    f"Ensure the appropriate API key env var is set "
+                    f"(GEMINI_API_KEY, OPENROUTER_API_KEY, ANTHROPIC_API_KEY, "
+                    f"or OPENAI_API_KEY)."
                 ) from exc
             except litellm.RateLimitError:  # type: ignore[attr-defined]
                 # One bounded retry. Spike code lets RateLimitError bubble;
