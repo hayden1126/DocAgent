@@ -83,3 +83,10 @@ warn_return_any = false
 module = ["litellm", "litellm.*"]
 ignore_missing_imports = true
 disallow_untyped_defs = false
+
+[tool.pytest.ini_options]
+# Scope discovery to our test tree. Without this, pytest descends into
+# `benchmarks/regeneration/clones/<repo>/tests/` (cloned upstream repos under
+# the regeneration benchmark) and produces ModuleNotFoundError collisions on
+# `tests.unit`, `tests.golden`, etc.
+testpaths = ["tests"]

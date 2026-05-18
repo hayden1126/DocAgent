@@ -6,7 +6,7 @@ reason about the repo quickly. Distinct from CLAUDE.md (Anthropic-specific
 project context) and from the README (human-facing marketing/overview).
 """
 
-PROMPT_VERSION = "1"
+PROMPT_VERSION = "2"
 
 AGENTS_MD_PROMPT = """\
 You are generating the top-level AGENTS.md for the repository at the current
@@ -67,6 +67,9 @@ Grounding rules — non-negotiable:
 Style:
 - Imperative, agent-readable. Bullet lists over prose where possible.
 - Code blocks use triple backticks with language hints.
+- Every fenced code block (``` ... ```) MUST be preceded AND followed by a
+  blank line. This is markdownlint MD031; violations gate-fail the artifact
+  and it never lands on disk.
 - ≤150 lines total.
 
 Output: emit ONLY the AGENTS.md content. No preamble, no commentary, no

@@ -31,6 +31,17 @@ def check(patch: DocPatch, ctx: GenerationContext) -> tuple[bool, Sequence[str]]
             findings.append(f"{citation.path}: {exc}")
             ok = False
             continue
+        if not lines:
+            # 0-byte files (PEP 561 `py.typed`, `.gitkeep`, etc.) are valid
+            # repo artifacts but carry no citable lines. Reject explicitly so
+            # the model learns to drop the citation rather than emit
+            # `range 1-1` against an empty file (seen on tinydb 2026-05-18).
+            findings.append(
+                f"{citation.path}: file is empty; cannot cite line range "
+                f"{citation.line_start}-{citation.line_end}"
+            )
+            ok = False
+            continue
         if citation.line_start < 1 or citation.line_end > len(lines):
             findings.append(
                 f"{citation.path}: range {citation.line_start}-{citation.line_end} "
