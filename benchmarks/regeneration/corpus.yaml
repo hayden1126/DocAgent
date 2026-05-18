@@ -13,7 +13,7 @@ repos:
   - name: tinydb
     language: python
     url: https://github.com/msiemens/tinydb
-    sha: null  # TODO: pin before first run, e.g. `git ls-remote https://... HEAD`
+    sha: 0428e3375e961a5f9f6c00d96d6750de8eb66de8
     notes: "Already validated in v1.0 live test; serves as sanity-check baseline."
 
   - name: click

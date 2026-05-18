@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -108,8 +109,27 @@ def strip_docs(clone_dir: Path, archive_dir: Path) -> list[str]:
     return moved
 
 
-def run_docagent_init(clone_dir: Path, backend: str, max_cost: float) -> tuple[int, list[str]]:
-    """Invoke `docagent init` in clone_dir. Returns (exit_code, artifact_files_written)."""
+_COST_RE = re.compile(r"cost=\$([0-9]+\.[0-9]+)")
+
+
+def _parse_cost_from_stdout(stdout: str) -> float | None:
+    """Best-effort: grep last `cost=$X.XXX` token from docagent stdout.
+
+    docagent emits this in cli.py:147 via `format_usd(summary.cost_usd)`. The
+    cleaner path would be a `last_run_cost_usd` field in `.docagent/state.json`,
+    but `RunState` (docagent/core/state.py:17-31) doesn't carry one today.
+    """
+    matches = _COST_RE.findall(stdout)
+    return float(matches[-1]) if matches else None
+
+
+def run_docagent_init(
+    clone_dir: Path, backend: str, max_cost: float
+) -> tuple[int, list[str], float | None]:
+    """Invoke `docagent init` in clone_dir.
+
+    Returns (exit_code, artifact_files_written, cost_usd_or_none).
+    """
     cmd = [
         "docagent", "init",
         "-C", str(clone_dir),
@@ -123,7 +143,7 @@ def run_docagent_init(clone_dir: Path, backend: str, max_cost: float) -> tuple[i
         name for name in (*DOC_TARGETS_FILES, "docs")
         if (clone_dir / name).exists()
     ]
-    return proc.returncode, written
+    return proc.returncode, written, _parse_cost_from_stdout(proc.stdout)
 
 
 def run_docagent_verify(clone_dir: Path) -> int:
@@ -159,14 +179,10 @@ def run_one(spec: RepoSpec, backend: str, max_cost: float) -> RunRecord:
     print(f"[{spec.name}] stripped: {stripped}")
 
     t0 = time.monotonic()
-    init_exit, written = run_docagent_init(clone_dir, backend, max_cost)
+    init_exit, written, cost_usd = run_docagent_init(clone_dir, backend, max_cost)
     wall = time.monotonic() - t0
     verify_exit = run_docagent_verify(clone_dir)
     copy_regenerated(clone_dir, regenerated_dir, written)
-
-    # TODO: parse cost_usd from `.docagent/run.json` once that's stable;
-    # for now leave it None and rely on stdout capture.
-    cost_usd: float | None = None
 
     record = RunRecord(
         name=spec.name,
@@ -185,8 +201,9 @@ def run_one(spec: RepoSpec, backend: str, max_cost: float) -> RunRecord:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--backend", default="anthropic",
-                        help="Backend to pass to `docagent init --backend`.")
+    parser.add_argument("--backend", default="agent_sdk",
+                        help="Backend to pass to `docagent init --backend` "
+                             "(agent_sdk | litellm; see docagent/cli.py:26).")
     parser.add_argument("--max-cost", type=float, default=5.0,
                         help="Per-repo cost cap in USD.")
     parser.add_argument("--only", action="append", default=[],
