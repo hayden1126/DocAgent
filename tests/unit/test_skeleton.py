@@ -32,6 +32,29 @@ def test_registry_topo_order_v1():
     assert "python_docstrings" not in api_ref.depends_on
 
 
+def test_topo_order_subset_includes_transitive_deps():
+    """`--only agents_md` must work even though agents_md depends on readme.
+    Regression for the v1.0 launch-day bug: users would get a KeyError
+    instead of the orchestrator auto-pulling readme into the run.
+    """
+    reg = Registry()
+    register_v1_builtins(reg)
+    order = [a.id for a in reg.topo_order(subset=["agents_md"])]
+    assert "readme" in order  # transitive dep auto-included
+    assert "agents_md" in order
+    assert order.index("readme") < order.index("agents_md")
+
+
+def test_topo_order_subset_unknown_artifact_still_raises():
+    """Unknown artifact ids must still surface — the transitive-closure
+    expansion must not silently accept typos.
+    """
+    reg = Registry()
+    register_v1_builtins(reg)
+    with pytest.raises(KeyError, match="nonexistent"):
+        reg.topo_order(subset=["nonexistent"])
+
+
 def test_registry_detects_cycle():
     from dataclasses import dataclass
 

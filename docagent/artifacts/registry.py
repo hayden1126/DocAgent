@@ -73,17 +73,34 @@ class Registry:
         return list(self._artifacts.values())
 
     def topo_order(self, subset: list[str] | None = None) -> list[DocArtifact]:
-        """Kahn's algorithm. Raises on cycle or unknown dependency."""
-        ids = set(subset) if subset is not None else set(self._artifacts)
-        for aid in ids:
-            if aid not in self._artifacts:
-                raise KeyError(f"Unknown artifact: {aid}")
+        """Kahn's algorithm. Raises on cycle or unknown artifact.
+
+        When `subset` is provided, transitive dependencies are auto-included
+        so callers using `--only X` don't have to know X's full dep chain.
+        Unknown dep ids (i.e. names not in `_artifacts` at all) still raise.
+        """
+        if subset is not None:
+            ids: set[str] = set()
+            stack: list[str] = list(subset)
+            while stack:
+                aid = stack.pop()
+                if aid in ids:
+                    continue
+                if aid not in self._artifacts:
+                    raise KeyError(f"Unknown artifact: {aid}")
+                ids.add(aid)
+                stack.extend(self._artifacts[aid].depends_on)
+        else:
+            ids = set(self._artifacts)
 
         in_degree: dict[str, int] = {aid: 0 for aid in ids}
         edges: dict[str, list[str]] = {aid: [] for aid in ids}
         for aid in ids:
             for dep in self._artifacts[aid].depends_on:
-                if dep not in ids:
+                # Transitive closure above guarantees `dep in ids`; the check
+                # is kept as a defensive assertion in case the registry is
+                # mutated mid-run.
+                if dep not in self._artifacts:
                     raise KeyError(f"Artifact {aid!r} depends on unknown {dep!r}")
                 edges[dep].append(aid)
                 in_degree[aid] += 1
