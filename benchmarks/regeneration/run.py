@@ -22,7 +22,7 @@ import shutil
 import subprocess
 import sys
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 try:
@@ -73,6 +73,7 @@ class RunRecord:
     cost_usd: float | None
     wall_seconds: float
     stripped_paths: list[str]
+    notes: list[str] = field(default_factory=list)
 
 
 def load_corpus(path: Path) -> list[RepoSpec]:
@@ -159,12 +160,17 @@ def _parse_cost_from_stdout(stdout: str) -> float | None:
     return float(matches[-1]) if matches else None
 
 
+_TIMEOUT_EXIT = -1  # sentinel exit code recorded on subprocess.TimeoutExpired
+
+
 def run_docagent_init(
-    clone_dir: Path, backend: str, max_cost: float
-) -> tuple[int, list[str], float | None]:
+    clone_dir: Path, backend: str, max_cost: float, timeout: float | None = None,
+) -> tuple[int, list[str], float | None, str | None]:
     """Invoke `docagent init` in clone_dir.
 
-    Returns (exit_code, artifact_files_written, cost_usd_or_none).
+    Returns `(exit_code, artifact_files_written, cost_usd_or_none, note_or_none)`.
+    A `subprocess.TimeoutExpired` returns exit_code=-1 and a human-readable
+    note so the cause is visible in `run.json` rather than as a stack trace.
     """
     cmd = [
         "docagent", "init",
@@ -172,24 +178,39 @@ def run_docagent_init(
         "--backend", backend,
         "--max-cost", str(max_cost),
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        sys.stdout.write(exc.stdout or "")
+        sys.stderr.write(exc.stderr or "")
+        note = f"docagent init timed out after {timeout}s"
+        sys.stderr.write(f"\n[run.py] {note}\n")
+        return _TIMEOUT_EXIT, [], _parse_cost_from_stdout(exc.stdout or ""), note
     sys.stdout.write(proc.stdout)
     sys.stderr.write(proc.stderr)
     written = [
         name for name in (*DOC_TARGETS_FILES, "docs")
         if (clone_dir / name).exists()
     ]
-    return proc.returncode, written, _parse_cost_from_stdout(proc.stdout)
+    return proc.returncode, written, _parse_cost_from_stdout(proc.stdout), None
 
 
-def run_docagent_verify(clone_dir: Path) -> int:
-    proc = subprocess.run(
-        ["docagent", "verify", "-C", str(clone_dir)],
-        capture_output=True, text=True,
-    )
+def run_docagent_verify(clone_dir: Path, timeout: float | None = None) -> tuple[int, str | None]:
+    """Returns `(exit_code, note_or_none)`. Timeout → exit_code=-1 with a note."""
+    try:
+        proc = subprocess.run(
+            ["docagent", "verify", "-C", str(clone_dir)],
+            capture_output=True, text=True, timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        sys.stdout.write(exc.stdout or "")
+        sys.stderr.write(exc.stderr or "")
+        note = f"docagent verify timed out after {timeout}s"
+        sys.stderr.write(f"\n[run.py] {note}\n")
+        return _TIMEOUT_EXIT, note
     sys.stdout.write(proc.stdout)
     sys.stderr.write(proc.stderr)
-    return proc.returncode
+    return proc.returncode, None
 
 
 def copy_regenerated(clone_dir: Path, dest: Path, artifact_names: list[str]) -> None:
@@ -202,7 +223,9 @@ def copy_regenerated(clone_dir: Path, dest: Path, artifact_names: list[str]) -> 
             shutil.copy2(src, dest / name)
 
 
-def run_one(spec: RepoSpec, backend: str, max_cost: float) -> RunRecord:
+def run_one(
+    spec: RepoSpec, backend: str, max_cost: float, timeout_seconds: float | None = None,
+) -> RunRecord:
     clone_dir = CLONES / spec.name
     sha = shallow_clone(spec, clone_dir)
     result_dir = RESULTS / f"{spec.name}-{sha[:12]}"
@@ -214,10 +237,17 @@ def run_one(spec: RepoSpec, backend: str, max_cost: float) -> RunRecord:
     stripped = strip_docs(clone_dir, original_dir)
     print(f"[{spec.name}] stripped: {stripped}")
 
+    notes: list[str] = []
     t0 = time.monotonic()
-    init_exit, written, cost_usd = run_docagent_init(clone_dir, backend, max_cost)
+    init_exit, written, cost_usd, init_note = run_docagent_init(
+        clone_dir, backend, max_cost, timeout=timeout_seconds,
+    )
     wall = time.monotonic() - t0
-    verify_exit = run_docagent_verify(clone_dir)
+    if init_note:
+        notes.append(init_note)
+    verify_exit, verify_note = run_docagent_verify(clone_dir, timeout=timeout_seconds)
+    if verify_note:
+        notes.append(verify_note)
     copy_regenerated(clone_dir, regenerated_dir, written)
 
     written_root = [a for a in written if a in EXPECTED_ROOT_ARTIFACTS]
@@ -236,6 +266,7 @@ def run_one(spec: RepoSpec, backend: str, max_cost: float) -> RunRecord:
         cost_usd=cost_usd,
         wall_seconds=wall,
         stripped_paths=stripped,
+        notes=notes,
     )
     (result_dir / "run.json").write_text(json.dumps(asdict(record), indent=2))
     return record
@@ -250,6 +281,11 @@ def main() -> int:
                         help="Per-repo cost cap in USD.")
     parser.add_argument("--only", action="append", default=[],
                         help="Run only these repo names (repeatable).")
+    parser.add_argument("--timeout-seconds", type=float, default=1800.0,
+                        help="Hard timeout for each docagent invocation. "
+                             "On timeout, exit_code=-1 is recorded with a "
+                             "note in run.json. Default 1800s (30min); the "
+                             "tinydb shakedown took ~1100s.")
     args = parser.parse_args()
 
     corpus = load_corpus(CORPUS)
@@ -265,7 +301,10 @@ def main() -> int:
             print(f"WARNING: {spec.name} has no pinned SHA; "
                   f"will use current HEAD. Pin it for reproducibility.")
         try:
-            records.append(run_one(spec, args.backend, args.max_cost))
+            records.append(run_one(
+                spec, args.backend, args.max_cost,
+                timeout_seconds=args.timeout_seconds,
+            ))
         except subprocess.CalledProcessError as exc:
             print(f"[{spec.name}] FAILED: {exc}", file=sys.stderr)
 
