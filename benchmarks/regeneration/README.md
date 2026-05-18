@@ -20,7 +20,8 @@ fraction of disagreements where DocAgent is correct per the source.
 
 | Metric | Source | What it tells you |
 |---|---|---|
-| `verifier_pass` | `docagent verify` exit code | Native KPI; deterministic gates passed |
+| `write_rate` | `len(artifacts_written) / artifacts_expected` from `run.json` | **First-class metric.** DocAgent's verifier is a moat that gate-fails bad LLM output. On stripped third-party repos the write rate is uncomfortably variable (tinydb: 0/4 root files on one run, 3/4 on another, same SHA). Coverage-vs-correctness tradeoff is real and needs to be reported alongside any quality score. |
+| `verifier_pass` | `docagent verify` exit code | Gate, not quality. Confirms citation line ranges resolve; says nothing about whether the span supports the claim. See KNOWN-GAPS.md §3. |
 | `topic_coverage_jaccard` | LLM judge (`prompts/topic_coverage.md`) | Did DocAgent miss things humans considered essential? |
 | `factual_divergence_rate` | LLM judge (`prompts/factual_divergence.md`) | How often do the two docs disagree on the same subject |
 | `divergence_resolution` | LLM judge + source code check (`prompts/divergence_resolution.md`) | **The killer chart.** For each disagreement: DocAgent / original / both-wrong |

@@ -57,12 +57,17 @@ class RepoSpec:
     notes: str = ""
 
 
+EXPECTED_ROOT_ARTIFACTS = ("README.md", "AGENTS.md", "CLAUDE.md", "llms.txt")
+
+
 @dataclass
 class RunRecord:
     name: str
     sha: str
     backend: str
     artifacts_written: list[str]
+    artifacts_expected: list[str]
+    write_rate: float
     docagent_init_exit: int
     docagent_verify_exit: int
     cost_usd: float | None
@@ -91,9 +96,32 @@ def shallow_clone(spec: RepoSpec, dest: Path) -> str:
     return sha
 
 
+def _is_sphinx_dir(d: Path) -> bool:
+    """Return True if `d` looks like a Sphinx source tree.
+
+    Heuristic: presence of `conf.py` OR any `*.rst` file. DocAgent emits
+    Markdown into `docs/reference/` and `docs/how-to/`; pitting that
+    against Sphinx RST is an unfair comparison (KNOWN-GAPS.md §4).
+    """
+    if (d / "conf.py").exists():
+        return True
+    try:
+        return any(d.glob("**/*.rst"))
+    except OSError:
+        return False
+
+
 def strip_docs(clone_dir: Path, archive_dir: Path) -> list[str]:
     """Move external-facing docs out of `clone_dir` into `archive_dir`.
-    Inline docstrings and code comments are intentionally NOT touched."""
+    Inline docstrings and code comments are intentionally NOT touched.
+
+    Sphinx `docs/` trees (detected via conf.py or *.rst presence) are
+    LEFT IN PLACE — DocAgent writes Markdown and can't reproduce RST,
+    so stripping a Sphinx tree would pit DocAgent against an artifact
+    it categorically can't recreate. A WARN is printed and the directory
+    name is suffixed with ` (skipped:sphinx)` in the returned list so
+    `run.json` records the decision.
+    """
     archive_dir.mkdir(parents=True, exist_ok=True)
     moved: list[str] = []
     for name in DOC_TARGETS_FILES:
@@ -104,6 +132,14 @@ def strip_docs(clone_dir: Path, archive_dir: Path) -> list[str]:
     for name in DOC_TARGETS_DIRS:
         src = clone_dir / name
         if src.exists() and src.is_dir():
+            if _is_sphinx_dir(src):
+                print(
+                    f"[strip_docs] WARN: {src} looks like a Sphinx source "
+                    f"tree (conf.py or *.rst present); leaving in place so "
+                    f"DocAgent's Markdown output isn't compared against RST."
+                )
+                moved.append(name + "/ (skipped:sphinx)")
+                continue
             shutil.move(str(src), str(archive_dir / name))
             moved.append(name + "/")
     return moved
@@ -184,11 +220,17 @@ def run_one(spec: RepoSpec, backend: str, max_cost: float) -> RunRecord:
     verify_exit = run_docagent_verify(clone_dir)
     copy_regenerated(clone_dir, regenerated_dir, written)
 
+    written_root = [a for a in written if a in EXPECTED_ROOT_ARTIFACTS]
+    expected = list(EXPECTED_ROOT_ARTIFACTS)
+    write_rate = len(written_root) / len(expected) if expected else 0.0
+
     record = RunRecord(
         name=spec.name,
         sha=sha,
         backend=backend,
         artifacts_written=written,
+        artifacts_expected=expected,
+        write_rate=write_rate,
         docagent_init_exit=init_exit,
         docagent_verify_exit=verify_exit,
         cost_usd=cost_usd,
