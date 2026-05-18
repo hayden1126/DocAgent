@@ -20,6 +20,31 @@ For the multi-provider backend (Gemini, OpenRouter, Anthropic-direct via LiteLLM
 pip install 'docagent[multi]'
 ```
 
+## Provider setup
+
+DocAgent has two backends. The default is the **Claude Agent SDK**, which delegates to your local `claude` CLI; a missing CLI surfaces an actionable hint and exits cleanly. <!-- ground: docagent/backends/agent_sdk.py:68-70 -->
+
+```bash
+# Default backend — uses your existing `claude` CLI session.
+docagent init
+```
+
+The opt-in **LiteLLM backend** (`pip install 'docagent[multi]'`) routes to Gemini, OpenRouter, or Anthropic-direct based on the model string. Set the appropriate provider env var: <!-- ground: docagent/backends/litellm_backend.py:211-217 -->
+
+| Provider | Model string example | Env var |
+|---|---|---|
+| Anthropic (direct) | `anthropic/claude-sonnet-4-6` | `ANTHROPIC_API_KEY` |
+| Google Gemini | `gemini/gemini-2.5-flash`, `gemini/gemini-2.5-pro` | `GEMINI_API_KEY` |
+| OpenRouter | `openrouter/anthropic/claude-sonnet-4-6` | `OPENROUTER_API_KEY` |
+| OpenAI | `openai/gpt-4o` | `OPENAI_API_KEY` |
+
+```bash
+export GEMINI_API_KEY=...
+docagent init --backend litellm --model gemini/gemini-2.5-pro
+```
+
+`--backend litellm` without `--model` exits with a clean hint listing the supported routing strings. <!-- ground: docagent/backends/litellm_backend.py:211-217 --> Unsupported models still run but emit a one-time `[unsupported-model]` warning per model name. **Ollama is deliberately out of v1**: the citation-emission rate measured 0% on `llama3.1:8b` during the spike, breaking the verifier moat; re-spike on Llama 3.3 70B+ / Qwen 2.5 Coder 32B+ is the v1.1 trigger. <!-- ground: .planning/decisions/0001-spike-results.md:1-15 -->
+
 ## Quickstart
 
 Installation registers a single `docagent` CLI entry point. <!-- ground: pyproject.toml:57-58 --> It exposes three commands — `init`, `update`, and `verify`. <!-- ground: docagent/cli.py:195-196 --> <!-- ground: docagent/cli.py:320-321 --> <!-- ground: docagent/cli.py:517-518 -->
