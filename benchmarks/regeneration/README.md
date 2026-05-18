@@ -20,12 +20,16 @@ fraction of disagreements where DocAgent is correct per the source.
 
 | Metric | Source | What it tells you |
 |---|---|---|
-| `write_rate` | `len(artifacts_written) / artifacts_expected` from `run.json` | **First-class metric.** DocAgent's verifier is a moat that gate-fails bad LLM output. On stripped third-party repos the write rate is uncomfortably variable (tinydb: 0/4 root files on one run, 3/4 on another, same SHA). Coverage-vs-correctness tradeoff is real and needs to be reported alongside any quality score. |
+| `write_rate` | `len(artifacts_written ∩ expected) / len(expected)` from `run.json` | **First-class metric.** DocAgent's verifier is a moat that gate-fails bad LLM output. On stripped third-party repos the write rate is uncomfortably variable (tinydb: 0/4 root files on one run, 3/4 on another, same SHA). Coverage-vs-correctness tradeoff is real and needs to be reported alongside any quality score. |
+| `factscore` | LLM judge (`prompts/factual_divergence.md`) | FActScore (Min et al. EMNLP 2023): atomic-claim decomposition, fraction supported by source. `supported_count / total_claims`. |
+| `claims_per_1000_tokens` | derived in `score.py` | Length normalization. Pair with raw `total_claims` so a terse doc can't silently win on divergence count. |
+| `completeness` (0–5) | LLM judge (`prompts/rubric_completeness.md`) | 3-axis rubric from Yang et al. ACL Demo 2025. How much public API + external-facing surface is mentioned, regardless of correctness. |
+| `helpfulness` (0–5) | LLM judge (`prompts/rubric_helpfulness.md`) | Can a competent developer get a first example running from the doc alone? |
+| `truthfulness` (0–5) | LLM judge (`prompts/rubric_truthfulness.md`) | Rolled-up axis score built on the FActScore JSON. Bucket boundaries are FActScore-anchored. |
+| `inter_judge_axis_disagreement` | derived in `score.py` | Max gap across `--judge-model` panel. Cross-family judge required before publication (KNOWN-GAPS.md §2). |
 | `verifier_pass` | `docagent verify` exit code | Gate, not quality. Confirms citation line ranges resolve; says nothing about whether the span supports the claim. See KNOWN-GAPS.md §3. |
 | `topic_coverage_jaccard` | LLM judge (`prompts/topic_coverage.md`) | Did DocAgent miss things humans considered essential? |
-| `factual_divergence_rate` | LLM judge (`prompts/factual_divergence.md`) | How often do the two docs disagree on the same subject |
-| `divergence_resolution` | LLM judge + source code check (`prompts/divergence_resolution.md`) | **The killer chart.** For each disagreement: DocAgent / original / both-wrong |
-| `unique_facts_docagent` | LLM judge (`prompts/unique_facts.md`) | Facts DocAgent surfaced that original missed |
+| `divergence_resolution` | LLM judge + source code check (`prompts/divergence_resolution.md`) | For contradicted FActScore claims: DocAgent / original / both-wrong / unverifiable. |
 | `cost_usd`, `wall_seconds` | `docagent init` telemetry | Free; already emitted |
 
 ## What gets stripped

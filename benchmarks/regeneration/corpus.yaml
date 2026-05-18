@@ -19,37 +19,37 @@ repos:
   - name: click
     language: python
     url: https://github.com/pallets/click
-    sha: null
-    notes: "CLI library; docs/ directory is substantial; good API-reference target."
+    sha: c9e94136b39b1fad4a47ac0d4478fa372bd07ff8
+    notes: "CLI library; docs/ is Sphinx (RST) — strip_docs will skip it."
 
   - name: typer
     language: python
     url: https://github.com/fastapi/typer
-    sha: null
-    notes: "CLI built on click; tutorial-heavy docs."
+    sha: 4e39eb7751d1dd4a94b3bf939d7f233ff517fee2
+    notes: "CLI built on click; mkdocs-material docs (Markdown — OK to strip)."
 
   - name: httpx
     language: python
     url: https://github.com/encode/httpx
-    sha: null
-    notes: "Async-capable HTTP client; docs cover both sync and async surfaces."
+    sha: b5addb64f0161ff6bfe94c124ef76f6a1fba5254
+    notes: "Async-capable HTTP client; mkdocs-material docs (Markdown)."
 
   - name: rich
     language: python
     url: https://github.com/Textualize/rich
-    sha: null
-    notes: "Large API surface; how-to-style docs."
+    sha: 46cebbb032f920eb096efbaf23cdc6fe9dd541f7
+    notes: "Large API surface; docs/ is Sphinx (RST) — strip_docs will skip it."
 
   - name: zod
     language: typescript
     url: https://github.com/colinhacks/zod
-    sha: null
+    sha: b6071fc0ad2be94850ed57e07e418a6f902a9771
     notes: "TS schema library; tests the TS api_reference artifact."
 
   - name: hono
     language: typescript
     url: https://github.com/honojs/hono
-    sha: null
+    sha: 7e62bcd22fa4e8f0e83cb564bac85e32f5434dd3
     notes: "Web framework; mixed JS/TS; tests cross-file resolution."
 
 # Repos to AVOID:

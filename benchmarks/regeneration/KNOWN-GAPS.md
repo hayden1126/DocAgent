@@ -91,7 +91,13 @@ tinydb had no `docs/` — wrong: it has `docs/api.rst`, `docs/conf.py`,
 DocAgent's Markdown `docs/reference/*.md` against Sphinx RST sources.
 This bites tinydb too, not just click/rich.
 
-### 5. No baselines (identity ceiling, empty floor)
+### 5. No baselines (identity ceiling, empty floor) — HARNESS LANDED 2026-05-18
+
+`score.py --baseline=identity` and `score.py --baseline=empty` now exist
+and run through the same scoring pipeline with degenerate inputs.
+**Still need to actually run them** with a real judge model + key
+before publishing any number; the harness is ready, the calls have not
+been spent.
 
 Without baselines, headline numbers are uninterpretable. Specifically:
 
@@ -110,59 +116,56 @@ If identity-vs-identity scores below ~0.7 Jaccard, the judge is too
 noisy to use as-is and the metric needs tightening (or a panel of
 3 judges with majority vote) before live scoring.
 
-### 6. No length normalization → silent-terseness win condition
+### 6. No length normalization → silent-terseness win condition — LANDED 2026-05-18
 
-A 200-word regenerated README has fewer claims, fewer divergences,
-and a high topic-Jaccard if it hits the headers. As-written, the
-metrics reward minimalism.
+`JudgePassMetrics.claims_per_1000_tokens` is computed alongside raw
+claim counts in `score.py` (approx 4 chars/token). Pair it with
+`total_claims` in any chart.
 
-**Mitigation:** report `claims_per_1000_tokens` alongside raw counts.
-Tighten the divergence prompt to penalize missing claims, not just
-contradictory ones.
+### 7. Adopt FActScore atomic decomposition — LANDED 2026-05-18
 
-### 7. Adopt FActScore atomic decomposition
+`prompts/factual_divergence.md` rewritten to do atomic per-claim
+verdicts (`supported / unsupported / contradicted`). `score.py`
+consumes the new schema and surfaces `factscore =
+supported_count / total_claims`. Citations from prior-art: Min et al.
+EMNLP 2023; DeepEval faithfulness pattern.
 
-Holistic divergence-count prompts (current
-`prompts/factual_divergence.md`) are too coarse. Replace with:
+### 8. Adopt DocAgent paper's 3-axis rubric — LANDED 2026-05-18
 
-> Break each doc into atomic claims. For each claim, mark
-> `supported / unsupported / contradicted` against the source code
-> with citation. Score = (supported / total).
-
-This makes the metric per-claim auditable and aligns with FActScore
-(Min et al. 2023) and DeepEval's faithfulness pattern.
-
-### 8. Adopt DocAgent paper's 3-axis rubric
-
-Replace the current single-judge holistic scores with three
-independent axes — **Completeness** (coverage of public-API surface),
-**Helpfulness** (utility to a reader), **Truthfulness** (per-claim
-grounding) — so a doc can't trade one axis for another. This is the
-exact pattern from Yang et al. 2025.
+Three new prompts (`prompts/rubric_completeness.md`,
+`prompts/rubric_helpfulness.md`, `prompts/rubric_truthfulness.md`)
+score the three axes independently 0–5 with anchored bucket
+boundaries. Truthfulness consumes the FActScore JSON to avoid
+re-paying for claim verification. Pattern from Yang et al., ACL Demo
+2025.
 
 ## Sequencing
 
-Suggested order for closing the gaps:
+Status of the close-the-gaps sequence (2026-05-18):
 
-1. **Step 4 shakedown** — verify `run.py` produces a clean `run.json`
-   on tinydb. (This commit + the follow-up.)
-2. **Sphinx-exclusion** in `strip_docs` — required before any
-   click/httpx/rich/typer run.
-3. **Identity + empty baselines** wired in `score.py` as the first
-   two judge calls. Don't write regen-scoring code until the noise
-   floor is known.
-4. **Cross-family judge** (Gemini or GPT-4o via LiteLLM). Both judges
-   run on every comparison; disagreement is logged.
-5. **FActScore atomic decomposition** rewrite of
-   `prompts/factual_divergence.md`.
-6. **3-axis rubric** rewrite of the score schema.
-7. **Contamination control** — pin one post-cutoff repo + (optionally)
-   one private synthetic repo. Pin remaining six SHAs.
+1. **Step 4 shakedown** — DONE. tinydb `run.json` produced cleanly on
+   the rerun; full log captured this time.
+2. **Sphinx-exclusion** in `strip_docs` — DONE (commit 7235e9c).
+3. **Identity + empty baselines** wired in `score.py` — HARNESS DONE,
+   live calls pending. Run `--baseline=identity` and `--baseline=empty`
+   with a real key before scoring regen.
+4. **Cross-family judge** — HARNESS DONE. `--judge-model` is repeatable;
+   `JudgePassMetrics` records per-judge scores;
+   `inter_judge_axis_disagreement` records max axis gap. Live calls
+   pending (needs Gemini or OpenAI key alongside Anthropic).
+5. **FActScore atomic decomposition** — DONE
+   (`prompts/factual_divergence.md`, `score.py::score_factscore`).
+6. **3-axis rubric** — DONE (three `prompts/rubric_*.md` +
+   `score.py::{score_completeness, score_helpfulness, score_truthfulness}`).
+7. **Contamination control** — still open. Need to pick one
+   post-model-cutoff repo or one private/synthetic repo. Other 6 SHAs
+   pinned (commit landing now).
 8. **Then** run end-to-end, report with confidence intervals + kappa,
    and explicitly cite Generate README Eval / FActScore / DocAgent
    paper in any writeup.
 
-Anything before step 8 is preparation, not publishable results.
+Steps 3+4 need API keys; step 7 needs a methodology decision. The
+code path is otherwise unblocked.
 
 ## Shakedown findings (2026-05-18, tinydb)
 
