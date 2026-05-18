@@ -90,6 +90,7 @@ class JudgePassMetrics:
     completeness: AxisScore | None = None
     helpfulness: AxisScore | None = None
     truthfulness: AxisScore | None = None
+    judge_cost_usd: float = 0.0
     notes: list[str] = field(default_factory=list)
 
 
@@ -99,6 +100,7 @@ class RepoMetrics:
     sha: str
     passes: list[JudgePassMetrics] = field(default_factory=list)
     inter_judge_axis_disagreement: dict[str, int] = field(default_factory=dict)
+    total_judge_cost_usd: float = 0.0
     notes: list[str] = field(default_factory=list)
 
 
@@ -129,7 +131,7 @@ def _ensure_judge_credentials(model: str) -> None:
         )
 
 
-def call_judge(prompt: str, model: str) -> str:
+def call_judge(prompt: str, model: str) -> tuple[str, float]:
     """Single judge call via `litellm.completion()`.
 
     The benchmark judge is a one-shot prompt→text call — no repo tools,
@@ -140,7 +142,10 @@ def call_judge(prompt: str, model: str) -> str:
     judges work out of the box once `pip install docagent[multi]` is
     done.
 
-    Returns the raw text content; the caller parses JSON.
+    Returns `(text, cost_usd)`. Cost is computed via the same
+    `cost_for_response` utility `LiteLLMBackend.run` uses
+    (`docagent/backends/_litellm_pricing.py:42`); never raises, returns
+    0.0 on unknown-model fallback.
     """
     _ensure_judge_credentials(model)
     # Import lazily so `--aggregate` and dry-imports work without the
@@ -152,6 +157,7 @@ def call_judge(prompt: str, model: str) -> str:
             "The `litellm` package is not installed. "
             "Install it with `pip install docagent[multi]`."
         ) from exc
+    from docagent.backends._litellm_pricing import cost_for_response
 
     litellm.drop_params = True
     litellm.suppress_debug_info = True
@@ -159,7 +165,38 @@ def call_judge(prompt: str, model: str) -> str:
         model=model,
         messages=[{"role": "user", "content": prompt}],
     )
-    return response["choices"][0]["message"]["content"]
+    text = response["choices"][0]["message"]["content"]
+    cost = cost_for_response(model, response)
+    return text, cost
+
+
+def _safe_judge_call(
+    prompt: str, model: str,
+) -> tuple[Any | None, float, str | None]:
+    """Run a single judge call and parse JSON, swallowing runtime errors.
+
+    Returns `(parsed_payload, cost_usd, error_or_None)`. `SystemExit` is
+    NOT caught — credential / install failures are setup errors that
+    should abort the whole run, not be logged per-call.
+
+    Runtime exceptions (network timeout, malformed JSON, LiteLLM
+    upstream error) become a `(None, 0.0, "<error type>: <msg>")` tuple
+    so a bad judge response on repo 3 of 7 doesn't tank repos 4–7.
+    Cost is 0.0 on failure — if the call partially succeeded and we
+    just couldn't parse, the upstream provider was still billed; an
+    unrecoverable response means we don't have `response` to price.
+    """
+    try:
+        raw, cost = call_judge(prompt, model)
+    except SystemExit:
+        raise
+    except Exception as exc:  # noqa: BLE001 — see docstring
+        return None, 0.0, f"{type(exc).__name__}: {exc}"
+    try:
+        parsed = _parse_json_response(raw)
+    except json.JSONDecodeError as exc:
+        return None, cost, f"JSONDecodeError: {exc.msg} (at char {exc.pos})"
+    return parsed, cost, None
 
 
 # ---- Prompt loading ----------------------------------------------------
@@ -192,11 +229,20 @@ def _claims_per_1000_tokens(claim_count: int, doc_text: str) -> float:
 
 
 # ---- Per-metric scorers ------------------------------------------------
+#
+# All scorers return their primary value plus `(cost_usd, error)` so the
+# orchestrator can accumulate cost into `JudgePassMetrics.judge_cost_usd`
+# and surface per-call failures via `JudgePassMetrics.notes`. The
+# returned primary value is `None` on failure so the caller can skip
+# downstream consumers without crashing.
 
-def score_factscore(regenerated: str, model: str) -> tuple[list[Claim], dict[str, Any]]:
+def score_factscore(
+    regenerated: str, model: str,
+) -> tuple[list[Claim], dict[str, Any] | None, float, str | None]:
     prompt = load_prompt("factual_divergence").format(regenerated_doc=regenerated)
-    raw = call_judge(prompt, model)
-    payload = _parse_json_response(raw)
+    payload, cost, err = _safe_judge_call(prompt, model)
+    if err is not None or payload is None:
+        return [], None, cost, err
     claims = [Claim(**c) for c in payload.get("claims", [])]
     summary = {
         "supported_count": payload.get("supported_count", 0),
@@ -205,21 +251,27 @@ def score_factscore(regenerated: str, model: str) -> tuple[list[Claim], dict[str
         "total_claims": payload.get("total_claims", len(claims)),
         "factscore": float(payload.get("factscore", 0.0)),
     }
-    return claims, summary
+    return claims, summary, cost, None
 
 
-def score_topic_coverage(original: str, regenerated: str, model: str) -> float:
+def score_topic_coverage(
+    original: str, regenerated: str, model: str,
+) -> tuple[float | None, float, str | None]:
     prompt = load_prompt("topic_coverage").format(
         original_doc=original, regenerated_doc=regenerated,
     )
-    raw = call_judge(prompt, model)
-    payload = _parse_json_response(raw)
-    return float(payload["jaccard"])
+    payload, cost, err = _safe_judge_call(prompt, model)
+    if err is not None or payload is None:
+        return None, cost, err
+    try:
+        return float(payload["jaccard"]), cost, None
+    except (KeyError, TypeError, ValueError) as exc:
+        return None, cost, f"{type(exc).__name__}: {exc}"
 
 
 def resolve_divergence(
     divergence: Divergence, repo_root: Path, model: str,
-) -> Divergence:
+) -> tuple[Divergence, float, str | None]:
     """Fetch the cited span (if any) and ask the judge which side the source supports."""
     source_excerpt = ""
     if divergence.docagent_citation:
@@ -237,39 +289,51 @@ def resolve_divergence(
         docagent_claim=divergence.docagent_claim,
         source_excerpt=source_excerpt or "<no citation>",
     )
-    raw = call_judge(prompt, model)
-    payload = _parse_json_response(raw)
-    divergence.resolution = payload["resolution"]
-    divergence.reasoning = payload["reasoning"]
-    return divergence
+    payload, cost, err = _safe_judge_call(prompt, model)
+    if err is not None or payload is None:
+        return divergence, cost, err
+    divergence.resolution = payload.get("resolution", "unverifiable")
+    divergence.reasoning = payload.get("reasoning", "")
+    return divergence, cost, None
 
 
-def _score_axis(prompt_name: str, regenerated: str, model: str,
-                **extra: str) -> AxisScore:
+def _score_axis(
+    prompt_name: str, axis_name: str, regenerated: str, model: str,
+    **extra: str,
+) -> tuple[AxisScore | None, float, str | None]:
     prompt = load_prompt(prompt_name).format(
         regenerated_doc=regenerated, **extra,
     )
-    raw = call_judge(prompt, model)
-    payload = _parse_json_response(raw)
+    payload, cost, err = _safe_judge_call(prompt, model)
+    if err is not None or payload is None:
+        return None, cost, err
+    # Defensive: judge sometimes returns {axis_name: N} instead of
+    # {"score": N}. Accept either; -1 sentinel for "field absent".
+    try:
+        raw_score = payload.get("score", payload.get(axis_name, -1))
+        score_value = int(raw_score)
+    except (TypeError, ValueError) as exc:
+        return None, cost, f"score parse: {type(exc).__name__}: {exc}"
     return AxisScore(
-        score=int(payload["score"]),
+        score=score_value,
         rationale=payload.get("rationale", ""),
         details={k: v for k, v in payload.items() if k not in ("score", "rationale")},
-    )
+    ), cost, None
 
 
-def score_completeness(regenerated: str, model: str) -> AxisScore:
-    return _score_axis("rubric_completeness", regenerated, model)
+def score_completeness(regenerated: str, model: str) -> tuple[AxisScore | None, float, str | None]:
+    return _score_axis("rubric_completeness", "completeness", regenerated, model)
 
 
-def score_helpfulness(regenerated: str, model: str) -> AxisScore:
-    return _score_axis("rubric_helpfulness", regenerated, model)
+def score_helpfulness(regenerated: str, model: str) -> tuple[AxisScore | None, float, str | None]:
+    return _score_axis("rubric_helpfulness", "helpfulness", regenerated, model)
 
 
 def score_truthfulness(regenerated: str, model: str,
-                       factscore_json: str) -> AxisScore:
+                       factscore_json: str) -> tuple[AxisScore | None, float, str | None]:
     return _score_axis(
-        "rubric_truthfulness", regenerated, model, factscore_json=factscore_json,
+        "rubric_truthfulness", "truthfulness", regenerated, model,
+        factscore_json=factscore_json,
     )
 
 
@@ -325,28 +389,44 @@ def score_one(
         original = orig_readme.read_text()
         regenerated = regen_readme.read_text()
 
+    def _record(err: str | None, stage: str) -> None:
+        if err is not None:
+            metrics.notes.append(f"{stage}: {err}")
+
     # 1. FActScore atomic decomposition
-    claims, fs = score_factscore(regenerated, judge_model)
-    metrics.factscore = fs["factscore"]
-    metrics.supported_count = fs["supported_count"]
-    metrics.unsupported_count = fs["unsupported_count"]
-    metrics.contradicted_count = fs["contradicted_count"]
-    metrics.total_claims = fs["total_claims"]
+    claims, fs, cost, err = score_factscore(regenerated, judge_model)
+    metrics.judge_cost_usd += cost
+    _record(err, "factscore")
+    if fs is not None:
+        metrics.factscore = fs["factscore"]
+        metrics.supported_count = fs["supported_count"]
+        metrics.unsupported_count = fs["unsupported_count"]
+        metrics.contradicted_count = fs["contradicted_count"]
+        metrics.total_claims = fs["total_claims"]
     metrics.claims_per_1000_tokens = _claims_per_1000_tokens(
         metrics.total_claims, regenerated,
     )
 
     # 2. Topic coverage
-    metrics.topic_coverage_jaccard = score_topic_coverage(
-        original, regenerated, judge_model,
-    )
+    jaccard, cost, err = score_topic_coverage(original, regenerated, judge_model)
+    metrics.judge_cost_usd += cost
+    _record(err, "topic_coverage")
+    metrics.topic_coverage_jaccard = jaccard
 
     # 3. Three-axis rubric
-    metrics.completeness = score_completeness(regenerated, judge_model)
-    metrics.helpfulness = score_helpfulness(regenerated, judge_model)
-    metrics.truthfulness = score_truthfulness(
-        regenerated, judge_model, json.dumps(fs),
+    metrics.completeness, cost, err = score_completeness(regenerated, judge_model)
+    metrics.judge_cost_usd += cost
+    _record(err, "completeness")
+
+    metrics.helpfulness, cost, err = score_helpfulness(regenerated, judge_model)
+    metrics.judge_cost_usd += cost
+    _record(err, "helpfulness")
+
+    metrics.truthfulness, cost, err = score_truthfulness(
+        regenerated, judge_model, json.dumps(fs) if fs is not None else "null",
     )
+    metrics.judge_cost_usd += cost
+    _record(err, "truthfulness")
 
     # 4. Divergence resolution — only meaningful for the non-baseline pass.
     # Identity-vs-identity has no divergences; empty-vs-original has only
@@ -364,7 +444,9 @@ def score_one(
                 resolution="unresolved",
                 reasoning="",
             )
-            resolved = resolve_divergence(div, repo_root, judge_model)
+            resolved, cost, err = resolve_divergence(div, repo_root, judge_model)
+            metrics.judge_cost_usd += cost
+            _record(err, f"divergence_resolution({claim.id})")
             bucket[resolved.resolution] = bucket.get(resolved.resolution, 0) + 1
         metrics.divergence_resolution = bucket
 
@@ -473,6 +555,9 @@ def main() -> int:
 
         repo_metrics.inter_judge_axis_disagreement = _disagreement_buckets(
             repo_metrics.passes,
+        )
+        repo_metrics.total_judge_cost_usd = round(
+            sum(p.judge_cost_usd for p in repo_metrics.passes), 6,
         )
         suffix = f".{args.baseline}" if args.baseline else ""
         (result_dir / f"metrics{suffix}.json").write_text(
