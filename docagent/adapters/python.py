@@ -82,6 +82,7 @@ class _SymbolCollector(cst.CSTVisitor):
         node: cst.CSTNode,
         name: str,
         kind: str,
+        signature: str,
     ) -> None:
         pos = self.get_metadata(PositionProvider, node)
         qn = ".".join(self._scope + [name])
@@ -97,7 +98,7 @@ class _SymbolCollector(cst.CSTVisitor):
                 byte_end=byte_end,
                 line_start=pos.start.line,
                 line_end=pos.end.line,
-                signature=name,
+                signature=signature,
                 existing_doc=existing_doc,
             )
         )
@@ -105,7 +106,7 @@ class _SymbolCollector(cst.CSTVisitor):
     def visit_FunctionDef(self, node: cst.FunctionDef) -> None:
         in_class = bool(self._scope_is_class) and self._scope_is_class[-1]
         kind = "method" if in_class else "function"
-        self._record(node, node.name.value, kind)
+        self._record(node, node.name.value, kind, _function_signature(node))
         self._scope.append(node.name.value)
         self._scope_is_class.append(False)
 
@@ -114,13 +115,52 @@ class _SymbolCollector(cst.CSTVisitor):
         self._scope_is_class.pop()
 
     def visit_ClassDef(self, node: cst.ClassDef) -> None:
-        self._record(node, node.name.value, "class")
+        self._record(node, node.name.value, "class", _class_signature(node))
         self._scope.append(node.name.value)
         self._scope_is_class.append(True)
 
     def leave_ClassDef(self, original_node: cst.ClassDef) -> None:
         self._scope.pop()
         self._scope_is_class.pop()
+
+
+_RENDER_MODULE = cst.Module(body=[])
+
+
+def _function_signature(node: cst.FunctionDef) -> str:
+    """Render ``name(params) -> return_annotation``.
+
+    Whitespace and trailing newlines from libcst are stripped. Async
+    functions are prefixed with ``async ``. Functions without a return
+    annotation render as ``name(params)``.
+    """
+    name = node.name.value
+    params_src = _RENDER_MODULE.code_for_node(node.params).strip()
+    sig = f"{name}({params_src})"
+    if node.returns is not None:
+        ann_src = _RENDER_MODULE.code_for_node(node.returns.annotation).strip()
+        sig = f"{sig} -> {ann_src}"
+    if getattr(node, "asynchronous", None) is not None:
+        sig = "async " + sig
+    return _collapse_ws(sig)
+
+
+def _class_signature(node: cst.ClassDef) -> str:
+    """Render ``Name(Base1, Base2, ...)`` or bare ``Name``."""
+    name = node.name.value
+    if not node.bases:
+        return name
+    base_parts = [
+        _RENDER_MODULE.code_for_node(arg.value).strip() for arg in node.bases
+    ]
+    return _collapse_ws(f"{name}({', '.join(base_parts)})")
+
+
+def _collapse_ws(text: str) -> str:
+    """Collapse internal whitespace to single spaces; libcst preserves
+    source newlines inside multi-line parameter lists, but a table cell
+    needs a single line."""
+    return " ".join(text.split())
 
 
 def _extract_docstring(node: cst.CSTNode) -> str | None:
