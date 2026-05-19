@@ -1,0 +1,12 @@
+# Benchmark working directories — `benchmarks/regeneration/run.py` clones
+# upstream repos under `clones/<repo>/` to feed `docagent init`. Without
+# this ignore, DocAgent's own scanner indexes those clones as if they
+# were part of DocAgent's source tree, and `api_reference` produces
+# `docs/reference/benchmarks.regeneration.clones.<repo>.*.md` files with
+# broken cross-links (each file links to siblings that may not exist).
+#
+# Surfaced 2026-05-19 by the v1.0.2 self-regen: 9 api_reference modules
+# gate-failed with `broken link: ...tinydb.tests.test_utils.md` and
+# similar.
+benchmarks/regeneration/clones/
+benchmarks/regeneration/results/
