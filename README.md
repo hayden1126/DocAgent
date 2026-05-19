@@ -10,16 +10,16 @@ Repositories accumulate stale READMEs, missing how-to guides, and undocumented A
 
 ## Install
 
-DocAgent targets Python 3.11+ and is distributed as the `docagent` package. <!-- ground: pyproject.toml:11-11 --> <!-- ground: pyproject.toml:6-6 -->
+DocAgent targets Python 3.11+ and is distributed on PyPI as the `docagent-ai` package (the `docagent` name itself is blocked by PyPI's similarity policy due to neighbours like `doc-agent` and `docs-agent`; the imported module and the CLI binary remain `docagent`). <!-- ground: pyproject.toml:11-11 --> <!-- ground: pyproject.toml:6-6 --> <!-- ground: pyproject.toml:57-58 -->
 
 ```bash
-pip install docagent
+pip install docagent-ai
 ```
 
 For the multi-provider backend (Gemini, OpenRouter, Anthropic-direct via LiteLLM), install the optional `multi` extra: <!-- ground: pyproject.toml:50-55 -->
 
 ```bash
-pip install 'docagent[multi]'
+pip install 'docagent-ai[multi]'
 ```
 
 ## Provider setup
