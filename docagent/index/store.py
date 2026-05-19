@@ -260,6 +260,35 @@ class Store:
         )
         return list(cur.fetchall())
 
+    def delete_artifact(self, artifact_id: str, path: str) -> int:
+        """Delete the row for a specific ``(artifact_id, path)`` pair.
+
+        Returns the number of rows deleted (0 or 1). Use this to prune a
+        stale artifact entry — e.g. one whose source tree was removed —
+        without resorting to raw SQL.
+        """
+        with self.transaction() as conn:
+            cur = conn.execute(
+                "DELETE FROM artifacts WHERE artifact_id = ? AND path = ?",
+                (artifact_id, path),
+            )
+            return cur.rowcount or 0
+
+    def delete_artifacts_matching(self, path_pattern: str) -> int:
+        """Bulk-delete artifact rows whose ``path`` matches a SQL LIKE pattern.
+
+        Returns the number of rows deleted. The caller owns the LIKE
+        pattern; this method exists to keep raw-SQL access out of
+        callers when pruning a whole subtree (e.g. the
+        clone-derived rows pruned during ``cfd7ce3`` curation).
+        """
+        with self.transaction() as conn:
+            cur = conn.execute(
+                "DELETE FROM artifacts WHERE path LIKE ?",
+                (path_pattern,),
+            )
+            return cur.rowcount or 0
+
     def artifact_paths(self) -> set[str]:
         """Set of relative paths registered in the artifacts table.
 

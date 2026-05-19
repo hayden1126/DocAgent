@@ -60,3 +60,33 @@ def test_list_artifacts_sorted(tmp_path: Path) -> None:
     ids = [row[0] for row in store.list_artifacts()]
     assert ids == ["agents_md", "readme"]
     store.close()
+
+
+def test_delete_artifact_removes_one_row(tmp_path: Path) -> None:
+    store = open_store(tmp_path)
+    now = datetime.now(timezone.utc).isoformat()
+    store.upsert_artifact("readme", "README.md", "d1", now)
+    store.upsert_artifact("agents_md", "AGENTS.md", "d2", now)
+    deleted = store.delete_artifact("readme", "README.md")
+    assert deleted == 1
+    assert store.artifact_paths() == {"AGENTS.md"}
+    # Idempotent: deleting a missing row returns 0, doesn't raise.
+    assert store.delete_artifact("readme", "README.md") == 0
+    store.close()
+
+
+def test_delete_artifacts_matching_bulk_prunes_by_like(tmp_path: Path) -> None:
+    store = open_store(tmp_path)
+    now = datetime.now(timezone.utc).isoformat()
+    store.upsert_artifact("api_reference", "docs/reference/pkg.a.md", "d1", now)
+    store.upsert_artifact("api_reference", "docs/reference/pkg.b.md", "d2", now)
+    store.upsert_artifact("api_reference", "docs/reference/clones.pkg.c.md", "d3", now)
+    store.upsert_artifact("readme", "README.md", "d4", now)
+
+    deleted = store.delete_artifacts_matching("docs/reference/clones.%")
+    assert deleted == 1
+    remaining = store.artifact_paths()
+    assert "docs/reference/clones.pkg.c.md" not in remaining
+    assert "docs/reference/pkg.a.md" in remaining
+    assert "README.md" in remaining
+    store.close()
