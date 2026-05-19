@@ -58,6 +58,11 @@ _log = get_logger("artifacts.how_to_guides")
 
 _DEFAULT_MAX_HOWTOS = 15
 
+# Cap on the "## See also" sibling list. Picked by source-overlap ranking
+# in HowToGuidesArtifact.generate; prevents the section from enumerating
+# the whole how-to directory.
+_SEE_ALSO_MAX = 5
+
 
 def _source_file_path(source: str) -> str:
     """Strip the ``:start-end`` line range from a citation, leaving the path."""
@@ -325,8 +330,21 @@ class HowToGuidesArtifact:
             )
         topic, _ = self._planned[slug]
 
-        # Resolve related slugs (siblings = other planned topics).
-        related_slugs = [s for s in self._slugs_to_write if s != slug]
+        # Resolve related slugs: rank siblings by source-path overlap with
+        # the current topic, then cap at _SEE_ALSO_MAX. Ties break
+        # alphabetically for determinism.
+        current_sources = {_source_file_path(s) for s in topic.sources}
+        scored: list[tuple[int, str]] = []
+        for s in self._slugs_to_write:
+            if s == slug:
+                continue
+            other = self._planned.get(s)
+            if other is None:
+                continue
+            other_sources = {_source_file_path(src) for src in other[0].sources}
+            scored.append((len(current_sources & other_sources), s))
+        scored.sort(key=lambda x: (-x[0], x[1]))
+        related_slugs = [s for _, s in scored[:_SEE_ALSO_MAX]]
         # Resolve related modules by parsing topic.sources for docs/reference/
         # citations and recovering the dotted name.
         related_modules: list[str] = []

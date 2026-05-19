@@ -19,7 +19,7 @@ pages so style stays consistent.
 
 from __future__ import annotations
 
-PROMPT_VERSION = "1"
+PROMPT_VERSION = "2"
 
 HEADER_MARKER = "<<<HOWTO_PAGE_BEGIN>>>"
 FOOTER_MARKER = "<<<HOWTO_PAGE_END>>>"
@@ -102,7 +102,12 @@ trailing prose after the second marker.
 
 ## Verify
 [One short paragraph or a single command the user runs to confirm the
-goal is met. Ground it.]
+goal is met. The check MUST exercise a behavioral assertion — import a
+symbol, call a CLI subcommand, query an API, observe a file/exit-code
+side effect — that proves the goal was achieved. Do NOT re-run the same
+command from Steps and rely on it reporting "already done" (e.g.
+"re-run `pip install`; pip will say already-installed" is circular and
+forbidden). Ground it.]
 
 ## Troubleshoot
 [Optional. Include this section ONLY if you have grounded
@@ -116,7 +121,11 @@ with empty content.]
 - Every imperative sentence in `## Steps` MUST carry a
   `<!-- ground: path:start-end -->` comment immediately after.
 - Citation paths are repo-relative; line ranges must reference real
-  lines you have read.
+  lines you have read. Before emitting any
+  `<!-- ground: PATH:A-B -->`, confirm B is ≤ the file's line count
+  (Read the file and verify). When unsure, cite a narrower range that
+  you have actually seen — the citations gate will reject ranges that
+  exceed file bounds and the artifact will not land on disk.
 - The H1 must be the imperative verb-noun title given above. Do NOT
   rewrite it as a noun phrase like "Introduction to X" or
   "Overview of Y".

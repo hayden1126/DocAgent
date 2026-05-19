@@ -50,6 +50,24 @@ def test_dunder_method_skipped() -> None:
     assert "Greeter.__init__" not in qns
 
 
+def test_methods_of_private_class_skipped() -> None:
+    """A public-named method under a private parent class is still private.
+
+    Regression for the ``_ByteOffsetTable.at`` case shipped in
+    ``docs/reference/docagent.adapters.python.md`` — public leaf, private
+    parent — which leaked into the public-surface table before v1.0.3.
+    """
+    mods = discover_python_modules(
+        [
+            _row("Public.method", "tinylib/cli.py"),
+            _row("_Private.public_method", "tinylib/cli.py"),
+        ]
+    )
+    qns = [s.qualified_name for s in mods[0].public_symbols]
+    assert "Public.method" in qns
+    assert "_Private.public_method" not in qns
+
+
 def test_init_py_collapses_to_package_name() -> None:
     mods = discover_python_modules([_row("greet", "tinylib/__init__.py")])
     assert mods[0].dotted_name == "tinylib"

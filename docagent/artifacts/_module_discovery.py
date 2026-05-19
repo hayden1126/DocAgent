@@ -7,7 +7,8 @@ is what ``ApiReferenceArtifact.plan`` walks — one task per dotted module.
 What we deliberately don't do here:
 
 - We don't parse ``__all__`` or resolve re-exports. A "public" symbol is one
-  whose qualified-name leaf does not start with ``_``.
+  whose qualified-name has NO segment starting with ``_`` — so private
+  classes and the methods nested under them are both filtered.
 - We don't probe ``pyproject.toml`` for package metadata. ``src/`` layout is
   detected by path-prefix only; if a project has ``src/`` somewhere else, it
   won't be peeled.
@@ -48,8 +49,8 @@ class DiscoveredModule:
 
 
 def _is_public_leaf(qualified_name: str) -> bool:
-    leaf = qualified_name.rsplit(".", 1)[-1]
-    return bool(leaf) and not leaf.startswith("_")
+    segments = qualified_name.split(".")
+    return bool(segments) and all(seg and not seg.startswith("_") for seg in segments)
 
 
 def _file_to_dotted(file_rel: str) -> str | None:

@@ -6,7 +6,7 @@ reason about the repo quickly. Distinct from CLAUDE.md (Anthropic-specific
 project context) and from the README (human-facing marketing/overview).
 """
 
-PROMPT_VERSION = "3"
+PROMPT_VERSION = "4"
 
 AGENTS_MD_PROMPT = """\
 You are generating the top-level AGENTS.md for the repository at the current
@@ -61,6 +61,10 @@ Grounding rules — non-negotiable:
   `<!-- ground: <relative-path>:<start>-<end> -->` HTML comment immediately
   after the sentence.
 - Paths are relative to the repo root and must exist.
+- Before emitting `<!-- ground: PATH:A-B -->`, confirm B is ≤ the file's
+  line count (Read the file). When unsure, cite a narrower range you
+  have actually seen. The citations gate rejects ranges that exceed file
+  bounds and the artifact will not land on disk.
 - Do not invent commands, scripts, or conventions you have not verified by
   reading the source.
 - Every fenced code block (``` ... ```) MUST be preceded AND followed by a
