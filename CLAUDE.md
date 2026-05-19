@@ -3,6 +3,8 @@
 
 Claude-specific notes for working on the DocAgent repository documentation agent; see `AGENTS.md` for setup, lint, and project-structure basics. <!-- ground: AGENTS.md:1-12 -->
 
+> Note: this project shares the name "DocAgent" with Meta's [facebookresearch/DocAgent](https://github.com/facebookresearch/DocAgent) ([arXiv 2504.08725](https://arxiv.org/abs/2504.08725)) but is a separate, unaffiliated project (whole-repo doc generation vs. docstring-only). See README's "How we differ" section.
+
 ## Quick commands
 
 ```bash

@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "docagent"
 version = "0.1.0-dev"
-description = "Repository documentation agent for humans and coding agents."
+description = "Whole-repo documentation generator (README, AGENTS.md, CLAUDE.md, how-to guides, API reference, llms.txt) with deterministic verifier and citation grounding. Not affiliated with facebookresearch/DocAgent (Meta AI, arXiv 2504.08725)."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"

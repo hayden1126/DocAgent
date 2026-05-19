@@ -2,6 +2,8 @@
 
 Repository documentation agent that generates and verifies grounded docs (README, AGENTS.md, CLAUDE.md, llms.txt, API reference, how-to guides) for humans and coding agents. <!-- ground: pyproject.toml:5-13 -->
 
+> Note: this project shares the name "DocAgent" with Meta's [facebookresearch/DocAgent](https://github.com/facebookresearch/DocAgent) ([arXiv 2504.08725](https://arxiv.org/abs/2504.08725)) but is a separate, unaffiliated project with a different scope (whole-repo doc generation vs. docstring-only). See README's "How we differ" section.
+
 ## Setup
 
 Python 3.11 or 3.12 required. <!-- ground: pyproject.toml:11-11 --> Install in editable mode with dev extras:

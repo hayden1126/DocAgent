@@ -2,6 +2,8 @@
 
 Repository documentation agent for humans and coding agents. <!-- ground: pyproject.toml:8-8 -->
 
+> **Not affiliated with [facebookresearch/DocAgent](https://github.com/facebookresearch/DocAgent)** (Meta AI, [arXiv 2504.08725](https://arxiv.org/abs/2504.08725), ACL 2025). That project is a multi-agent pipeline for generating Python docstrings. This project is a single-agent CLI that generates whole-repository documentation (README, AGENTS.md, CLAUDE.md, how-to guides, API reference, llms.txt) with a deterministic verifier and citation-grounded output. See [How we differ](#how-we-differ) below.
+
 ## Why
 
 Repositories accumulate stale READMEs, missing how-to guides, and undocumented APIs faster than humans can maintain them, and AI coding assistants increasingly need their own orientation files (`AGENTS.md`, `CLAUDE.md`, `llms.txt`) alongside the human-facing docs. DocAgent treats documentation as a set of verifiable artifacts driven by a DAG, generates them with an LLM backend, and verifies every claim against the actual source via a deterministic-first pipeline. <!-- ground: docagent/artifacts/builtins.py:1-15 --> The verifier is built around ground-citation comments (`<!-- ground: path:start-end -->`) so generated docs stay anchored to real code. <!-- ground: docagent/cli.py:14-23 -->
@@ -76,6 +78,21 @@ DocAgent is organized into orthogonal packages under `docagent/`:
 ## Status
 
 Pre-Alpha. <!-- ground: pyproject.toml:14-15 --> The artifact pipeline runs end-to-end and self-verifies through the deterministic gates, but the package version is still `0.1.0.dev0` and APIs may change. <!-- ground: pyproject.toml:7-7 --> <!-- ground: docagent/__init__.py:3-3 -->
+
+## How we differ
+
+This project shares the name "DocAgent" with Meta AI's [facebookresearch/DocAgent](https://github.com/facebookresearch/DocAgent) ([arXiv 2504.08725](https://arxiv.org/abs/2504.08725), ACL 2025 demo) but is a separate, unaffiliated project with a different scope:
+
+| Axis | Meta's DocAgent | This project |
+|---|---|---|
+| **Scope** | Python docstrings only, symbol-level | Whole-repo artifacts: README, AGENTS.md, CLAUDE.md, how-to guides, API reference, `llms.txt`, plus docstrings |
+| **Topology** | 5-agent pipeline (Navigator → Reader / Searcher / Writer / Verifier / Orchestrator) | Single-agent orchestrator over the Claude Agent SDK |
+| **Verification** | LLM "Verifier" agent | Deterministic-first gate pipeline (ground-citation validation, markdownlint, structure, secrets) |
+| **Indexing** | In-process dependency graph | Persisted SQLite symbol index (libcst + tree-sitter) |
+| **Grounding** | Hierarchical context build | `<!-- ground: path:line-start-line-end -->` citation enforcement on every non-trivial claim |
+| **Distribution** | Research repo, clone-and-run | `pip install`-able CLI: `docagent init / update / verify` |
+
+If you arrived here looking for the Meta paper's reference implementation, you want [facebookresearch/DocAgent](https://github.com/facebookresearch/DocAgent).
 
 ## License
 
