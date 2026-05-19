@@ -132,3 +132,14 @@ def test_ignore_matcher_filters_defaults(tmp_path: Path):
     assert matcher.is_ignored(tmp_path / "vendor" / "lib.py")
     assert matcher.is_ignored(tmp_path / "node_modules" / "pkg" / "index.js")
     assert not matcher.is_ignored(tmp_path / "src" / "main.py")
+
+
+def test_ignore_matcher_filters_benchmark_clones(tmp_path: Path):
+    """Regeneration-benchmark scratch trees must be ignored by default
+    so DocAgent doesn't index a cloned foreign repo as its own source
+    (regression: docs/reference/benchmarks.regeneration.clones.* leak)."""
+    matcher = IgnoreMatcher(tmp_path)
+    assert matcher.is_ignored(tmp_path / "benchmarks" / "regeneration" / "clones" / "tinydb" / "tinydb" / "database.py")
+    assert matcher.is_ignored(tmp_path / "benchmarks" / "regeneration" / "results" / "run-001" / "score.json")
+    # Real benchmark harness code should remain indexable.
+    assert not matcher.is_ignored(tmp_path / "benchmarks" / "regeneration" / "run.py")

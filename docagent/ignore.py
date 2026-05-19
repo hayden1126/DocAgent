@@ -28,6 +28,11 @@ DEFAULT_PATTERNS: tuple[str, ...] = (
     ".docagent/",
     ".git/",
     ".github/workflows/",  # often noisy; opt-in via override
+    # Regeneration-benchmark scratch trees (DocAgent itself uses these,
+    # and other projects building similar harnesses will too). Skip by
+    # default so indexed cloned repos don't pollute api_reference output.
+    "benchmarks/**/clones/",
+    "benchmarks/**/results/",
 )
 
 
