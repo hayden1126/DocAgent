@@ -77,7 +77,7 @@ DocAgent is organized into orthogonal packages under `docagent/`:
 
 ## Status
 
-Pre-Alpha. <!-- ground: pyproject.toml:14-15 --> The artifact pipeline runs end-to-end and self-verifies through the deterministic gates, but the package version is still `0.1.0.dev0` and APIs may change. <!-- ground: pyproject.toml:7-7 --> <!-- ground: docagent/__init__.py:3-3 -->
+Beta. <!-- ground: pyproject.toml:14-15 --> The artifact pipeline runs end-to-end and self-verifies through the deterministic gates; the package version is `1.0.4` and APIs may still change between minor releases. <!-- ground: pyproject.toml:7-7 --> <!-- ground: docagent/__init__.py:3-3 -->
 
 ## How we differ
 
